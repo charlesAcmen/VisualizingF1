@@ -9,7 +9,7 @@ import fastf1
 import pandas as pd
 
 
-CACHE_DIR = Path(__file__).resolve().parents[1] / ".fastf1_cache"
+CACHE_DIR = Path(__file__).resolve().parent / ".fastf1_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 fastf1.Cache.enable_cache(str(CACHE_DIR))
 fastf1.set_log_level("WARNING")
