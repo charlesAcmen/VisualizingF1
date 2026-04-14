@@ -570,27 +570,37 @@ export default function App() {
               {driversDisabled ? (
                 <div className="note">No drivers loaded yet (check season/event/session).</div>
               ) : (
-                <div className="driver-grid">
-                  {drivers.map((driver) => {
-                    const active = selectedDrivers.includes(driver);
-                    return (
-                      <button
-                        key={driver}
-                        type="button"
-                        className={active ? "driver-btn active" : "driver-btn"}
-                        onClick={() => {
-                          setSelectedDrivers((prev) => {
-                            if (prev.includes(driver)) {
-                              return prev.filter((item) => item !== driver);
-                            }
-                            return [...prev, driver];
-                          });
-                        }}
-                      >
-                        {driver}
-                      </button>
-                    );
-                  })}
+                <div className="driver-select-wrap">
+                  <div className="driver-actions">
+                    <button type="button" className="driver-action-btn" onClick={() => setSelectedDrivers(drivers)}>
+                      Select All
+                    </button>
+                    <button type="button" className="driver-action-btn" onClick={() => setSelectedDrivers([])}>
+                      Clear
+                    </button>
+                  </div>
+                  <div className="driver-grid">
+                    {drivers.map((driver) => {
+                      const active = selectedDrivers.includes(driver);
+                      return (
+                        <button
+                          key={driver}
+                          type="button"
+                          className={active ? "driver-btn active" : "driver-btn"}
+                          onClick={() => {
+                            setSelectedDrivers((prev) => {
+                              if (prev.includes(driver)) {
+                                return prev.filter((item) => item !== driver);
+                              }
+                              return [...prev, driver];
+                            });
+                          }}
+                        >
+                          {driver}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               {!driversDisabled ? (
