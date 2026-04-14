@@ -1,6 +1,5 @@
 ﻿import json
 import logging
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from time import perf_counter
@@ -125,7 +124,6 @@ def build_payload(season, gp, session_code, driver, lap_selector):
         "driver": driver,
         "lap_number": lap_number_value,
         "lap_time": lap_time,
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
     }
 
     return {
@@ -159,6 +157,7 @@ SESSION_NAME_TO_CODE = {
     "Qualifying": "Q",
     "Sprint Qualifying": "S",
     "Sprint": "S",
+    "Sprint Race": "S",
     "Sprint Shootout": "SS",
     "Race": "R",
 }

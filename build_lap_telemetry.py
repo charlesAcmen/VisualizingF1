@@ -1,7 +1,5 @@
 import argparse
 import json
-import math
-from datetime import datetime, timezone
 from pathlib import Path
 
 import fastf1
@@ -15,15 +13,6 @@ def format_lap_time(value):
     minutes = int(total_seconds // 60)
     seconds = total_seconds - minutes * 60
     return f"{minutes}:{seconds:06.3f}"
-
-
-def downsample(df, max_points=2500):
-    if not max_points or max_points <= 0:
-        return df
-    if len(df) <= max_points:
-        return df
-    step = max(1, math.ceil(len(df) / max_points))
-    return df.iloc[::step].copy()
 
 
 def float_or_none(value):
@@ -58,28 +47,9 @@ def main():
     parser.add_argument("--driver", type=str, default="VER")
     parser.add_argument("--lap", type=str, default="fastest")
     parser.add_argument("--out", type=str, default=str(Path(__file__).parent / "data" / "lap_telemetry.json"))
-    parser.add_argument(
-        "--max-points",
-        type=int,
-        default=0,
-        help="Maximum number of telemetry points to keep (0 = no downsample).",
-    )
-    parser.add_argument(
-        "--dedupe-distance",
-        action="store_true",
-        help="Drop duplicated distance rows (off by default for raw-data fidelity).",
-    )
-    parser.add_argument(
-        "--fill-missing-with-zero",
-        action="store_true",
-        help="Fill missing telemetry values with 0 (off by default; keeps nulls).",
-    )
-    parser.add_argument(
-        "--round-decimals",
-        type=int,
-        default=-1,
-        help="Round numeric outputs to N decimals (-1 keeps original precision).",
-    )
+    parser.add_argument("--dedupe-distance", action="store_true", help="Drop duplicated distance rows.")
+    parser.add_argument("--fill-missing-with-zero", action="store_true", help="Fill missing values with zero.")
+    parser.add_argument("--round-decimals", type=int, default=-1, help="Round numeric values to N decimals (-1 keeps full precision).")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent
@@ -113,7 +83,6 @@ def main():
     car_data = car_data[car_data["Distance"].notna()].copy()
     if args.dedupe_distance:
         car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
-    car_data = downsample(car_data, max_points=args.max_points)
 
     channels = [
         ("Speed", "km/h"),
@@ -159,7 +128,6 @@ def main():
         "driver": driver,
         "lap_number": lap_number_value,
         "lap_time": lap_time,
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
     }
 
     output = {

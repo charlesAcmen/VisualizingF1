@@ -23,7 +23,6 @@ type TelemetryMeta = {
   driver: string;
   lap_number: number | null;
   lap_time: string | null;
-  generated_utc: string;
 };
 
 type CornerInfo = {
@@ -87,6 +86,19 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new Error(detail);
   }
   return (await response.json()) as T;
+}
+
+function summarizeDriverError(driver: string, error: string | null): string {
+  if (!error) {
+    return `${driver} load failed`;
+  }
+  if (error.includes("Fastest lap not found")) {
+    return `${driver} has no fastest lap`;
+  }
+  if (error.includes("No laps found")) {
+    return `${driver} has no laps`;
+  }
+  return `${driver} failed`;
 }
 
 export default function App() {
@@ -366,11 +378,7 @@ export default function App() {
       } else {
         const failed = results.filter((item) => item.payload === null);
         setTone("error");
-        setStatus(
-          `Loaded ${successful.length}/${results.length} drivers. Failed: ${failed
-            .map((item) => `${item.driver} (${item.error})`)
-            .join("; ")}`
-        );
+        setStatus(`Loaded ${successful.length}/${results.length} drivers. ${failed.map((item) => summarizeDriverError(item.driver, item.error)).join("; ")}`);
       }
     } catch (error) {
       console.error(error);
@@ -715,10 +723,6 @@ export default function App() {
                 <span>Session</span>
                 <span>{primaryDataset?.meta?.session ?? "-"}</span>
               </div>
-              <div className="meta-row">
-                <span>Generated</span>
-                <span>{primaryDataset?.meta?.generated_utc ?? "-"}</span>
-              </div>
             </div>
             <div className="meta-drivers">
               {driverResults.map((result) => (
@@ -736,7 +740,7 @@ export default function App() {
                       </div>
                     </>
                   ) : (
-                    <div className="note">Load failed: {result.error}</div>
+                    <div className="note">{summarizeDriverError(result.driver, result.error)}</div>
                   )}
                 </div>
               ))}
