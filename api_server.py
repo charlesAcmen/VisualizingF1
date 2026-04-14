@@ -194,7 +194,33 @@ def build_session_list(season, gp):
 def build_driver_list(season, gp, session_code):
     session = load_session(season, gp, session_code, telemetry=False)
     drivers = sorted(session.laps["Driver"].dropna().unique().tolist())
-    return drivers
+    driver_meta = {}
+
+    try:
+        results = session.results
+    except Exception:
+        results = None
+
+    if results is not None and not results.empty:
+        for _, row in results.iterrows():
+            code = str(row.get("Abbreviation", "")).strip().upper()
+            if not code:
+                continue
+            team_name = row.get("TeamName")
+            team_color = row.get("TeamColor")
+            if pd.isna(team_name):
+                team_name = None
+            if pd.isna(team_color):
+                team_color = None
+            color_value = None
+            if team_color:
+                color_value = f"#{str(team_color).strip().lstrip('#')}"
+            driver_meta[code] = {"team_name": team_name, "team_color": color_value}
+
+    for code in drivers:
+        driver_meta.setdefault(code, {"team_name": None, "team_color": None})
+
+    return drivers, driver_meta
 
 
 def build_lap_list(season, gp, session_code, driver):
@@ -248,10 +274,16 @@ class Handler(BaseHTTPRequestHandler):
                 season = int(params.get("season", [2021])[0])
                 gp = params.get("gp", ["Spanish Grand Prix"])[0]
                 session_code = params.get("session", ["Q"])[0]
-                drivers = build_driver_list(season, gp, session_code)
+                drivers, driver_meta = build_driver_list(season, gp, session_code)
                 self._send_json(
                     200,
-                    {"season": season, "event": gp, "session": session_code, "drivers": drivers},
+                    {
+                        "season": season,
+                        "event": gp,
+                        "session": session_code,
+                        "drivers": drivers,
+                        "driver_meta": driver_meta,
+                    },
                 )
             except Exception as exc:
                 self._send_json(400, {"error": str(exc)})

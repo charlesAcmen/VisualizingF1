@@ -56,6 +56,11 @@ type SessionOption = {
   name: string;
 };
 
+type DriverMeta = {
+  team_name: string | null;
+  team_color: string | null;
+};
+
 type FormState = {
   season: string;
   gp: string;
@@ -106,6 +111,7 @@ export default function App() {
   const [events, setEvents] = useState<EventOption[]>([]);
   const [sessions, setSessions] = useState<SessionOption[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
+  const [driverMeta, setDriverMeta] = useState<Record<string, DriverMeta>>({});
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>([]);
   const [lapOptions, setLapOptions] = useState<Record<string, number[]>>({});
   const [lapSelection, setLapSelection] = useState<Record<string, string>>({});
@@ -128,6 +134,14 @@ export default function App() {
   const isGear = metric === "nGear";
   const driversDisabled = drivers.length === 0;
 
+  function getDriverColor(driver: string, index: number) {
+    const dynamic = driverMeta[driver]?.team_color;
+    if (dynamic && /^#([0-9a-fA-F]{6})$/.test(dynamic)) {
+      return dynamic;
+    }
+    return DRIVER_COLORS[index % DRIVER_COLORS.length];
+  }
+
   useEffect(() => {
     const seasonValue = Number(form.season);
     if (!Number.isFinite(seasonValue)) {
@@ -138,6 +152,7 @@ export default function App() {
     setEvents([]);
     setSessions([]);
     setDrivers([]);
+    setDriverMeta({});
     setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
@@ -167,6 +182,7 @@ export default function App() {
         setEvents([]);
         setSessions([]);
         setDrivers([]);
+        setDriverMeta({});
         setSelectedDrivers([]);
       }
     })();
@@ -177,6 +193,7 @@ export default function App() {
     if (!Number.isFinite(seasonValue) || !form.gp) {
       setSessions([]);
       setDrivers([]);
+      setDriverMeta({});
       setSelectedDrivers([]);
       return;
     }
@@ -184,6 +201,7 @@ export default function App() {
     const requestId = ++sessionsRequestIdRef.current;
     setSessions([]);
     setDrivers([]);
+    setDriverMeta({});
     setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
@@ -213,6 +231,7 @@ export default function App() {
         }
         setSessions([]);
         setDrivers([]);
+        setDriverMeta({});
         setSelectedDrivers([]);
       }
     })();
@@ -222,12 +241,14 @@ export default function App() {
     const seasonValue = Number(form.season);
     if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
       setDrivers([]);
+      setDriverMeta({});
       setSelectedDrivers([]);
       return;
     }
 
     const requestId = ++driversRequestIdRef.current;
     setDrivers([]);
+    setDriverMeta({});
     setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
@@ -238,11 +259,14 @@ export default function App() {
         url.searchParams.set("season", String(seasonValue));
         url.searchParams.set("gp", form.gp);
         url.searchParams.set("session", form.session);
-        const payload = await fetchJson<{ drivers: string[] }>(url.toString());
+        const payload = await fetchJson<{ drivers: string[]; driver_meta?: Record<string, DriverMeta> }>(
+          url.toString()
+        );
         if (requestId !== driversRequestIdRef.current) {
           return;
         }
         const driverList = payload.drivers ?? [];
+        setDriverMeta(payload.driver_meta ?? {});
         setDrivers(driverList);
         setSelectedDrivers((prev) => {
           const filtered = prev.filter((driver) => driverList.includes(driver));
@@ -257,6 +281,7 @@ export default function App() {
           return;
         }
         setDrivers([]);
+        setDriverMeta({});
         setSelectedDrivers([]);
       }
     })();
@@ -398,7 +423,7 @@ export default function App() {
     }
 
     const traces = driverResults.map((result, index) => {
-      const color = DRIVER_COLORS[index % DRIVER_COLORS.length];
+      const color = getDriverColor(result.driver, index);
       if (!result.payload) {
         return {
           x: [null],
@@ -572,21 +597,32 @@ export default function App() {
               ) : (
                 <div className="driver-select-wrap">
                   <div className="driver-actions">
-                    <button type="button" className="driver-action-btn" onClick={() => setSelectedDrivers(drivers)}>
-                      Select All
-                    </button>
-                    <button type="button" className="driver-action-btn" onClick={() => setSelectedDrivers([])}>
-                      Clear
+                    <button
+                      type="button"
+                      className="driver-action-btn"
+                      onClick={() => {
+                        setSelectedDrivers((prev) => (prev.length === drivers.length ? [] : [...drivers]));
+                      }}
+                    >
+                      {selectedDrivers.length === drivers.length ? "Unselect All" : "Select All"}
                     </button>
                   </div>
                   <div className="driver-grid">
                     {drivers.map((driver) => {
                       const active = selectedDrivers.includes(driver);
+                      const driverColor = driverMeta[driver]?.team_color;
                       return (
                         <button
                           key={driver}
                           type="button"
                           className={active ? "driver-btn active" : "driver-btn"}
+                          style={
+                            driverColor
+                              ? active
+                                ? { borderColor: driverColor, boxShadow: `inset 0 0 0 2px ${driverColor}` }
+                                : { borderColor: driverColor }
+                              : undefined
+                          }
                           onClick={() => {
                             setSelectedDrivers((prev) => {
                               if (prev.includes(driver)) {
@@ -603,11 +639,6 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {!driversDisabled ? (
-                <div className="note">
-                  Selected: {selectedDrivers.length ? selectedDrivers.join(", ") : "none"}
-                </div>
-              ) : null}
             </div>
             <button className="primary" type="button" onClick={loadTelemetry}>
               Load Telemetry
@@ -615,7 +646,7 @@ export default function App() {
             <div className="status" data-tone={tone}>
               {status}
             </div>
-            <div className="note">API base: {API_BASE}</div>
+            {import.meta.env.DEV ? <div className="note">API base: {API_BASE}</div> : null}
           </div>
 
           <div className="panel-block">
@@ -689,9 +720,9 @@ export default function App() {
                       ))}
                     </select>
                     <span className="lap-count">
-                      {(lapOptions[driver] ?? []).length
-                        ? `${lapOptions[driver].length} laps`
-                        : "Loading..."}
+                      {lapOptions[driver] === undefined
+                        ? "Loading..."
+                        : `${lapOptions[driver].length} laps`}
                     </span>
                   </div>
                 ))}
