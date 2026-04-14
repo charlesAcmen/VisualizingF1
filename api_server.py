@@ -1,8 +1,11 @@
 ﻿import json
+import logging
 import math
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from time import perf_counter
+import traceback
 from urllib.parse import parse_qs, urlparse
 
 import fastf1
@@ -12,7 +15,9 @@ import pandas as pd
 CACHE_DIR = Path(__file__).resolve().parent / ".fastf1_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 fastf1.Cache.enable_cache(str(CACHE_DIR))
-fastf1.set_log_level("WARNING")
+# Keep FastF1 loading logs visible in server console.
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s", force=True)
+fastf1.set_log_level("INFO")
 
 
 def format_lap_time(value):
@@ -98,17 +103,20 @@ def build_payload(season, gp, session_code, driver, lap_selector, max_points):
         raise ValueError(f"No laps found for driver '{driver}'.")
 
     if str(lap_selector).lower() == "fastest":
-        lap = laps.pick_fastest()
+        lap_row = laps.pick_fastest()
+        if lap_row is None or getattr(lap_row, "empty", False):
+            raise ValueError(f"Fastest lap not found for driver '{driver}'.")
     else:
         try:
             lap_number = int(lap_selector)
         except ValueError as exc:
             raise ValueError("Lap must be 'fastest' or an integer.") from exc
-        lap = laps.pick_lap(lap_number)
-        if lap.empty:
+        lap_matches = laps.pick_lap(lap_number)
+        if lap_matches.empty:
             raise ValueError(f"Lap {lap_number} not found for driver '{driver}'.")
+        lap_row = lap_matches.iloc[0]
 
-    car_data = lap.get_car_data().add_distance()
+    car_data = lap_row.get_car_data().add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
     car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
     car_data = downsample(car_data, max_points)
@@ -133,8 +141,9 @@ def build_payload(season, gp, session_code, driver, lap_selector, max_points):
         else:
             data[channel] = [round(float(val), 3) for val in series.fillna(0).to_numpy()]
 
-    lap_time = format_lap_time(lap.get("LapTime"))
-    lap_number_value = int(lap.get("LapNumber")) if not pd.isna(lap.get("LapNumber")) else None
+    lap_time = format_lap_time(lap_row.get("LapTime"))
+    lap_number_raw = lap_row.get("LapNumber")
+    lap_number_value = int(lap_number_raw) if not pd.isna(lap_number_raw) else None
 
     meta = {
         "season": season,
@@ -175,6 +184,7 @@ SESSION_NAME_TO_CODE = {
     "Practice 2": "FP2",
     "Practice 3": "FP3",
     "Qualifying": "Q",
+    "Sprint Qualifying": "S",
     "Sprint": "S",
     "Sprint Shootout": "SS",
     "Race": "R",
@@ -227,6 +237,9 @@ def build_lap_list(season, gp, session_code, driver):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        print(f"[HTTP] {self.address_string()} - {format % args}", flush=True)
+
     def _send_json(self, status, payload):
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -317,6 +330,11 @@ class Handler(BaseHTTPRequestHandler):
                 driver = params.get("driver", ["VER"])[0].upper()
                 lap_selector = params.get("lap", ["fastest"])[0]
                 max_points = parse_max_points(params)
+                started = perf_counter()
+                print(
+                    f"[API] /api/lap season={season} gp={gp} session={session_code} driver={driver} lap={lap_selector} max_points={max_points}",
+                    flush=True,
+                )
 
                 payload = build_payload(
                     season=season,
@@ -326,8 +344,13 @@ class Handler(BaseHTTPRequestHandler):
                     lap_selector=lap_selector,
                     max_points=max_points,
                 )
+                elapsed_ms = (perf_counter() - started) * 1000
+                point_count = len(payload.get("data", {}).get("distance_m", []))
+                print(f"[API] /api/lap success points={point_count} elapsed_ms={elapsed_ms:.1f}", flush=True)
                 self._send_json(200, payload)
             except Exception as exc:
+                print(f"[API] /api/lap error: {exc}", flush=True)
+                traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
 

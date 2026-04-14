@@ -71,7 +71,16 @@ const defaultForm: FormState = {
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (body?.error) {
+        detail = `${detail}: ${body.error}`;
+      }
+    } catch {
+      // Keep default detail when response body is not JSON.
+    }
+    throw new Error(detail);
   }
   return (await response.json()) as T;
 }
@@ -339,7 +348,8 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setTone("error");
-      setStatus("Failed to load telemetry. Check the API server.");
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Failed to load telemetry: ${message}`);
     }
   }
 

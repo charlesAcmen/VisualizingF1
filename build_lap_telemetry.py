@@ -26,6 +26,18 @@ def downsample(df, max_points=2500):
     return df.iloc[::step].copy()
 
 
+def float_or_none(value):
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def int_or_none(value):
+    if value is None or pd.isna(value):
+        return None
+    return int(value)
+
+
 def resolve_event_name(event):
     if event is None:
         return None
@@ -51,6 +63,22 @@ def main():
         type=int,
         default=0,
         help="Maximum number of telemetry points to keep (0 = no downsample).",
+    )
+    parser.add_argument(
+        "--dedupe-distance",
+        action="store_true",
+        help="Drop duplicated distance rows (off by default for raw-data fidelity).",
+    )
+    parser.add_argument(
+        "--fill-missing-with-zero",
+        action="store_true",
+        help="Fill missing telemetry values with 0 (off by default; keeps nulls).",
+    )
+    parser.add_argument(
+        "--round-decimals",
+        type=int,
+        default=-1,
+        help="Round numeric outputs to N decimals (-1 keeps original precision).",
     )
     args = parser.parse_args()
 
@@ -83,7 +111,8 @@ def main():
     car_data = lap.get_car_data()
     car_data = car_data.add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
-    car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
+    if args.dedupe_distance:
+        car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
     car_data = downsample(car_data, max_points=args.max_points)
 
     channels = [
@@ -94,19 +123,32 @@ def main():
         ("nGear", "gear"),
     ]
 
-    data = {"distance_m": [round(float(val), 3) for val in car_data["Distance"].to_numpy()]}
+    if args.round_decimals >= 0:
+        distance_values = [
+            None if val is None else round(val, args.round_decimals)
+            for val in [float_or_none(v) for v in car_data["Distance"].to_numpy()]
+        ]
+    else:
+        distance_values = [float_or_none(v) for v in car_data["Distance"].to_numpy()]
+    data = {"distance_m": distance_values}
     channel_units = {}
     for channel, unit in channels:
         if channel not in car_data.columns:
             continue
         channel_units[channel] = unit
         series = car_data[channel]
+        if args.fill_missing_with_zero:
+            series = series.fillna(0)
         if channel == "Brake":
-            data[channel] = [int(val) for val in series.fillna(0).astype(int).to_numpy()]
+            values = [int_or_none(val) for val in series.to_numpy()]
         elif channel == "nGear":
-            data[channel] = [int(val) for val in series.fillna(0).astype(int).to_numpy()]
+            values = [int_or_none(val) for val in series.to_numpy()]
         else:
-            data[channel] = [round(float(val), 3) for val in series.fillna(0).to_numpy()]
+            values = [float_or_none(val) for val in series.to_numpy()]
+
+        if args.round_decimals >= 0 and channel not in {"Brake", "nGear"}:
+            values = [None if val is None else round(val, args.round_decimals) for val in values]
+        data[channel] = values
 
     lap_time = format_lap_time(lap.get("LapTime"))
     lap_number_value = int(lap.get("LapNumber")) if not pd.isna(lap.get("LapNumber")) else None
