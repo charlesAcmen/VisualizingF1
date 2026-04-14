@@ -61,7 +61,6 @@ type FormState = {
   season: string;
   gp: string;
   session: string;
-  maxPoints: string;
 };
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -71,7 +70,6 @@ const defaultForm: FormState = {
   season: String(CURRENT_YEAR),
   gp: "",
   session: "",
-  maxPoints: "0",
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -332,7 +330,6 @@ export default function App() {
     setStatus(`Loading telemetry for ${selectedDrivers.length} driver${selectedDrivers.length > 1 ? "s" : ""}...`);
 
     try {
-      const maxPointsValue = Number(form.maxPoints);
       const results = await Promise.all(
         selectedDrivers.map(async (driver) => {
           const url = new URL("/api/lap", API_BASE);
@@ -341,9 +338,6 @@ export default function App() {
           url.searchParams.set("session", form.session);
           url.searchParams.set("driver", driver);
           url.searchParams.set("lap", lapSelection[driver] ?? "fastest");
-          if (Number.isFinite(maxPointsValue) && maxPointsValue > 0) {
-            url.searchParams.set("max_points", String(maxPointsValue));
-          }
           try {
             const payload = await fetchJson<TelemetryResponse>(url.toString());
             return { driver, payload, error: null } as DriverResult;
@@ -596,14 +590,6 @@ export default function App() {
                   Selected: {selectedDrivers.length ? selectedDrivers.join(", ") : "none"}
                 </div>
               ) : null}
-            </div>
-            <div className="field">
-              <span className="label">Max Points</span>
-              <input
-                value={form.maxPoints}
-                onChange={(event) => setForm({ ...form, maxPoints: event.target.value })}
-                placeholder="0 = no downsample"
-              />
             </div>
             <button className="primary" type="button" onClick={loadTelemetry}>
               Load Telemetry

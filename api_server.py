@@ -1,6 +1,5 @@
 ﻿import json
 import logging
-import math
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,15 +28,6 @@ def format_lap_time(value):
     return f"{minutes}:{seconds:06.3f}"
 
 
-def downsample(df, max_points):
-    if not max_points or max_points <= 0:
-        return df
-    if len(df) <= max_points:
-        return df
-    step = max(1, math.ceil(len(df) / max_points))
-    return df.iloc[::step].copy()
-
-
 def resolve_event_name(event):
     if event is None:
         return None
@@ -48,22 +38,6 @@ def resolve_event_name(event):
             return event["EventName"]
         except Exception:
             return str(event)
-
-
-def parse_max_points(params):
-    raw = params.get("max_points", [None])[0]
-    if raw is None:
-        return None
-    raw = str(raw).strip()
-    if raw == "":
-        return None
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError("max_points must be an integer.") from exc
-    if value <= 0:
-        return None
-    return value
 
 
 def load_session(season, gp, session_code, telemetry=False):
@@ -95,7 +69,7 @@ def build_corners(session):
     return corners
 
 
-def build_payload(season, gp, session_code, driver, lap_selector, max_points):
+def build_payload(season, gp, session_code, driver, lap_selector):
     session = load_session(season, gp, session_code, telemetry=True)
 
     laps = session.laps.pick_drivers(driver)
@@ -119,7 +93,6 @@ def build_payload(season, gp, session_code, driver, lap_selector, max_points):
     car_data = lap_row.get_car_data().add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
     car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
-    car_data = downsample(car_data, max_points)
 
     channels = [
         ("Speed", "km/h"),
@@ -329,10 +302,9 @@ class Handler(BaseHTTPRequestHandler):
                 session_code = params.get("session", ["Q"])[0]
                 driver = params.get("driver", ["VER"])[0].upper()
                 lap_selector = params.get("lap", ["fastest"])[0]
-                max_points = parse_max_points(params)
                 started = perf_counter()
                 print(
-                    f"[API] /api/lap season={season} gp={gp} session={session_code} driver={driver} lap={lap_selector} max_points={max_points}",
+                    f"[API] /api/lap season={season} gp={gp} session={session_code} driver={driver} lap={lap_selector}",
                     flush=True,
                 )
 
@@ -342,7 +314,6 @@ class Handler(BaseHTTPRequestHandler):
                     session_code=session_code,
                     driver=driver,
                     lap_selector=lap_selector,
-                    max_points=max_points,
                 )
                 elapsed_ms = (perf_counter() - started) * 1000
                 point_count = len(payload.get("data", {}).get("distance_m", []))
