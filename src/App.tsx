@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
@@ -126,8 +126,14 @@ export default function App() {
   const sessionsRequestIdRef = useRef(0);
   const driversRequestIdRef = useRef(0);
 
-  const validResults = driverResults.filter((item) => item.payload !== null);
-  const primaryDataset = validResults[0]?.payload ?? null;
+  const validResults = useMemo(
+    () => driverResults.filter((item) => item.payload !== null),
+    [driverResults]
+  );
+  const primaryDataset = useMemo(
+    () => validResults[0]?.payload ?? null,
+    [validResults]
+  );
   const availableChannels = primaryDataset?.channels ?? [];
   const unit = primaryDataset?.channel_units?.[metric] ?? "";
   const isBoolean = metric === "Brake";
@@ -315,7 +321,7 @@ export default function App() {
     }
 
     selectedDrivers.forEach((driver) => {
-      if (lapOptions[driver]) {
+      if (lapOptions[driver] !== undefined) {
         return;
       }
       (async () => {
