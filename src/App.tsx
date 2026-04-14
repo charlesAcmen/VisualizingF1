@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
@@ -46,6 +46,11 @@ type EventOption = {
   date: string | null;
 };
 
+type SessionOption = {
+  code: string;
+  name: string;
+};
+
 type FormState = {
   season: string;
   gp: string;
@@ -53,10 +58,13 @@ type FormState = {
   maxPoints: string;
 };
 
+const CURRENT_YEAR = new Date().getFullYear();
+const SEASON_OPTIONS = Array.from({ length: CURRENT_YEAR - 2018 + 1 }, (_, idx) => String(CURRENT_YEAR - idx));
+
 const defaultForm: FormState = {
-  season: "2021",
-  gp: "Spanish Grand Prix",
-  session: "Q",
+  season: String(CURRENT_YEAR),
+  gp: "",
+  session: "",
   maxPoints: "0",
 };
 
@@ -71,21 +79,28 @@ async function fetchJson<T>(url: string): Promise<T> {
 export default function App() {
   const [form, setForm] = useState<FormState>(defaultForm);
   const [events, setEvents] = useState<EventOption[]>([]);
+  const [sessions, setSessions] = useState<SessionOption[]>([]);
   const [drivers, setDrivers] = useState<string[]>([]);
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>([]);
   const [lapOptions, setLapOptions] = useState<Record<string, number[]>>({});
   const [lapSelection, setLapSelection] = useState<Record<string, string>>({});
+  const [bulkLapMode, setBulkLapMode] = useState<"fastest" | "number">("fastest");
+  const [bulkLapNumber, setBulkLapNumber] = useState<string>("");
   const [datasets, setDatasets] = useState<TelemetryResponse[]>([]);
   const [metric, setMetric] = useState<string>("Speed");
   const [status, setStatus] = useState<string>("Idle");
   const [tone, setTone] = useState<"ready" | "loading" | "error">("ready");
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const eventsRequestIdRef = useRef(0);
+  const sessionsRequestIdRef = useRef(0);
+  const driversRequestIdRef = useRef(0);
 
   const primaryDataset = datasets[0] ?? null;
   const availableChannels = primaryDataset?.channels ?? [];
   const unit = primaryDataset?.channel_units?.[metric] ?? "";
   const isBoolean = metric === "Brake";
   const isGear = metric === "nGear";
+  const driversDisabled = drivers.length === 0;
 
   useEffect(() => {
     const seasonValue = Number(form.season);
@@ -93,37 +108,101 @@ export default function App() {
       return;
     }
 
+    const requestId = ++eventsRequestIdRef.current;
+    setEvents([]);
+    setSessions([]);
+    setDrivers([]);
+    setSelectedDrivers([]);
+    setLapOptions({});
+    setLapSelection({});
+
     (async () => {
       try {
         const url = new URL("/api/events", API_BASE);
         url.searchParams.set("season", String(seasonValue));
         const payload = await fetchJson<{ events: EventOption[] }>(url.toString());
+        if (requestId !== eventsRequestIdRef.current) {
+          return;
+        }
         const eventList = payload.events ?? [];
         setEvents(eventList);
         setForm((prev) => {
-          if (!eventList.length) {
-            return prev;
-          }
-          const current = prev.gp;
-          if (eventList.some((event) => event.name === current)) {
-            return prev;
-          }
-          return { ...prev, gp: eventList[0].name };
+          const nextGp =
+            eventList.some((event) => event.name === prev.gp)
+              ? prev.gp
+              : (eventList[0]?.name ?? "");
+          return { ...prev, gp: nextGp, session: "" };
         });
       } catch (error) {
         console.error(error);
+        if (requestId !== eventsRequestIdRef.current) {
+          return;
+        }
         setEvents([]);
+        setSessions([]);
+        setDrivers([]);
+        setSelectedDrivers([]);
       }
     })();
   }, [form.season]);
 
   useEffect(() => {
     const seasonValue = Number(form.season);
-    if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
+    if (!Number.isFinite(seasonValue) || !form.gp) {
+      setSessions([]);
       setDrivers([]);
+      setSelectedDrivers([]);
       return;
     }
 
+    const requestId = ++sessionsRequestIdRef.current;
+    setSessions([]);
+    setDrivers([]);
+    setSelectedDrivers([]);
+    setLapOptions({});
+    setLapSelection({});
+
+    (async () => {
+      try {
+        const url = new URL("/api/sessions", API_BASE);
+        url.searchParams.set("season", String(seasonValue));
+        url.searchParams.set("gp", form.gp);
+        const payload = await fetchJson<{ sessions: SessionOption[] }>(url.toString());
+        if (requestId !== sessionsRequestIdRef.current) {
+          return;
+        }
+        const sessionList = payload.sessions ?? [];
+        setSessions(sessionList);
+        setForm((prev) => {
+          const nextSession =
+            sessionList.some((session) => session.code === prev.session)
+              ? prev.session
+              : (sessionList[0]?.code ?? "");
+          return { ...prev, session: nextSession };
+        });
+      } catch (error) {
+        console.error(error);
+        if (requestId !== sessionsRequestIdRef.current) {
+          return;
+        }
+        setSessions([]);
+        setDrivers([]);
+        setSelectedDrivers([]);
+      }
+    })();
+  }, [form.season, form.gp]);
+
+  useEffect(() => {
+    const seasonValue = Number(form.season);
+    if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
+      setDrivers([]);
+      setSelectedDrivers([]);
+      return;
+    }
+
+    const requestId = ++driversRequestIdRef.current;
+    setDrivers([]);
+    setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
 
@@ -134,6 +213,9 @@ export default function App() {
         url.searchParams.set("gp", form.gp);
         url.searchParams.set("session", form.session);
         const payload = await fetchJson<{ drivers: string[] }>(url.toString());
+        if (requestId !== driversRequestIdRef.current) {
+          return;
+        }
         const driverList = payload.drivers ?? [];
         setDrivers(driverList);
         setSelectedDrivers((prev) => {
@@ -145,7 +227,11 @@ export default function App() {
         });
       } catch (error) {
         console.error(error);
+        if (requestId !== driversRequestIdRef.current) {
+          return;
+        }
         setDrivers([]);
+        setSelectedDrivers([]);
       }
     })();
   }, [form.season, form.gp, form.session]);
@@ -360,8 +446,6 @@ export default function App() {
     Plotly.react(chartRef.current, traces, layout, config);
   }, [datasets, metric, unit, isBoolean, isGear, primaryDataset]);
 
-  const driverSelectSize = Math.min(Math.max(drivers.length, 4), 10);
-
   return (
     <div className="app">
       <header>
@@ -375,15 +459,24 @@ export default function App() {
             <div className="block-title">Query</div>
             <div className="field">
               <span className="label">Season</span>
-              <input
+              <select
                 value={form.season}
                 onChange={(event) => setForm({ ...form, season: event.target.value })}
-                placeholder="2021"
-              />
+              >
+                {SEASON_OPTIONS.map((season) => (
+                  <option key={season} value={season}>
+                    {season}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <span className="label">Grand Prix</span>
-              <select value={form.gp} onChange={(event) => setForm({ ...form, gp: event.target.value })}>
+              <select
+                value={form.gp}
+                onChange={(event) => setForm({ ...form, gp: event.target.value })}
+                disabled={events.length === 0}
+              >
                 {events.map((event) => (
                   <option key={event.name} value={event.name}>
                     {event.name}
@@ -396,32 +489,48 @@ export default function App() {
               <select
                 value={form.session}
                 onChange={(event) => setForm({ ...form, session: event.target.value })}
+                disabled={sessions.length === 0}
               >
-                <option value="R">Race (R)</option>
-                <option value="Q">Qualifying (Q)</option>
-                <option value="S">Sprint (S)</option>
-                <option value="FP1">FP1</option>
-                <option value="FP2">FP2</option>
-                <option value="FP3">FP3</option>
+                {sessions.map((session) => (
+                  <option key={session.code} value={session.code}>
+                    {session.name} ({session.code})
+                  </option>
+                ))}
               </select>
             </div>
             <div className="field">
               <span className="label">Drivers</span>
-              <select
-                multiple
-                size={driverSelectSize}
-                value={selectedDrivers}
-                onChange={(event) => {
-                  const values = Array.from(event.target.selectedOptions).map((option) => option.value);
-                  setSelectedDrivers(values);
-                }}
-              >
-                {drivers.map((driver) => (
-                  <option key={driver} value={driver}>
-                    {driver}
-                  </option>
-                ))}
-              </select>
+              {driversDisabled ? (
+                <div className="note">No drivers loaded yet (check season/event/session).</div>
+              ) : (
+                <div className="driver-grid">
+                  {drivers.map((driver) => {
+                    const active = selectedDrivers.includes(driver);
+                    return (
+                      <button
+                        key={driver}
+                        type="button"
+                        className={active ? "driver-btn active" : "driver-btn"}
+                        onClick={() => {
+                          setSelectedDrivers((prev) => {
+                            if (prev.includes(driver)) {
+                              return prev.filter((item) => item !== driver);
+                            }
+                            return [...prev, driver];
+                          });
+                        }}
+                      >
+                        {driver}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {!driversDisabled ? (
+                <div className="note">
+                  Selected: {selectedDrivers.length ? selectedDrivers.join(", ") : "none"}
+                </div>
+              ) : null}
             </div>
             <div className="field">
               <span className="label">Max Points</span>
@@ -446,6 +555,54 @@ export default function App() {
               <div className="note">Select drivers above to choose laps.</div>
             ) : (
               <div className="driver-laps">
+                <div className="bulk-lap">
+                  <span className="bulk-label">Apply to all selected drivers</span>
+                  <div className="bulk-controls">
+                    <select value={bulkLapMode} onChange={(event) => setBulkLapMode(event.target.value as "fastest" | "number")}>
+                      <option value="fastest">Fastest</option>
+                      <option value="number">Lap number</option>
+                    </select>
+                    {bulkLapMode === "number" ? (
+                      <input
+                        value={bulkLapNumber}
+                        onChange={(event) => setBulkLapNumber(event.target.value)}
+                        placeholder="e.g. 12"
+                        inputMode="numeric"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLapSelection((prev) => {
+                          const next = { ...prev };
+                          if (bulkLapMode === "fastest") {
+                            selectedDrivers.forEach((driver) => {
+                              next[driver] = "fastest";
+                            });
+                            return next;
+                          }
+
+                          const targetLap = Number(bulkLapNumber);
+                          if (!Number.isFinite(targetLap) || targetLap <= 0) {
+                            selectedDrivers.forEach((driver) => {
+                              next[driver] = "fastest";
+                            });
+                            return next;
+                          }
+
+                          selectedDrivers.forEach((driver) => {
+                            const options = lapOptions[driver] ?? [];
+                            next[driver] = options.includes(targetLap) ? String(targetLap) : "fastest";
+                          });
+                          return next;
+                        });
+                      }}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                  <div className="note">If a lap number doesn't exist for a driver, it falls back to Fastest.</div>
+                </div>
                 {selectedDrivers.map((driver) => (
                   <div className="driver-lap-row" key={driver}>
                     <span className="driver-pill">{driver}</span>

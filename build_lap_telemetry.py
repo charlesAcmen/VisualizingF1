@@ -46,10 +46,15 @@ def main():
     parser.add_argument("--driver", type=str, default="VER")
     parser.add_argument("--lap", type=str, default="fastest")
     parser.add_argument("--out", type=str, default=str(Path(__file__).parent / "data" / "lap_telemetry.json"))
-    parser.add_argument("--max-points", type=int, default=0)
+    parser.add_argument(
+        "--max-points",
+        type=int,
+        default=0,
+        help="Maximum number of telemetry points to keep (0 = no downsample).",
+    )
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parent
     cache_dir = repo_root / ".fastf1_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 

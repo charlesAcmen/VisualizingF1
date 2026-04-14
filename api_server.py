@@ -170,6 +170,45 @@ def build_event_list(season):
     return events
 
 
+SESSION_NAME_TO_CODE = {
+    "Practice 1": "FP1",
+    "Practice 2": "FP2",
+    "Practice 3": "FP3",
+    "Qualifying": "Q",
+    "Sprint": "S",
+    "Sprint Shootout": "SS",
+    "Race": "R",
+}
+
+
+def build_session_list(season, gp):
+    event = fastf1.get_event(season, gp)
+    sessions = []
+    seen_codes = set()
+
+    for idx in range(1, 6):
+        key = f"Session{idx}"
+        if key not in event.index:
+            continue
+        raw_name = event.get(key)
+        if raw_name is None or pd.isna(raw_name):
+            continue
+
+        name = str(raw_name).strip()
+        if not name:
+            continue
+
+        code = SESSION_NAME_TO_CODE.get(name)
+        if code is None:
+            continue
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        sessions.append({"code": code, "name": name})
+
+    return sessions
+
+
 def build_driver_list(season, gp, session_code):
     session = load_session(season, gp, session_code, telemetry=False)
     drivers = sorted(session.laps["Driver"].dropna().unique().tolist())
@@ -228,6 +267,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(
                     200,
                     {"season": season, "event": gp, "session": session_code, "drivers": drivers},
+                )
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/sessions":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2021])[0])
+                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                sessions = build_session_list(season, gp)
+                self._send_json(
+                    200,
+                    {"season": season, "event": gp, "sessions": sessions},
                 )
             except Exception as exc:
                 self._send_json(400, {"error": str(exc)})
