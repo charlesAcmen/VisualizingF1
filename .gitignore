@@ -17,5 +17,18 @@ Thumbs.db
 # Logs
 *.log
 
+# Secrets / local env
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+*credentials*.json
+secrets/
+
 # Python cache
 __pycache__/
