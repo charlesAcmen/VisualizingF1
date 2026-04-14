@@ -40,6 +40,12 @@ type TelemetryResponse = {
   corners?: CornerInfo[];
 };
 
+type DriverResult = {
+  driver: string;
+  payload: TelemetryResponse | null;
+  error: string | null;
+};
+
 type EventOption = {
   name: string;
   round: number;
@@ -95,7 +101,7 @@ export default function App() {
   const [lapSelection, setLapSelection] = useState<Record<string, string>>({});
   const [bulkLapMode, setBulkLapMode] = useState<"fastest" | "number">("fastest");
   const [bulkLapNumber, setBulkLapNumber] = useState<string>("");
-  const [datasets, setDatasets] = useState<TelemetryResponse[]>([]);
+  const [driverResults, setDriverResults] = useState<DriverResult[]>([]);
   const [metric, setMetric] = useState<string>("Speed");
   const [status, setStatus] = useState<string>("Idle");
   const [tone, setTone] = useState<"ready" | "loading" | "error">("ready");
@@ -104,7 +110,8 @@ export default function App() {
   const sessionsRequestIdRef = useRef(0);
   const driversRequestIdRef = useRef(0);
 
-  const primaryDataset = datasets[0] ?? null;
+  const validResults = driverResults.filter((item) => item.payload !== null);
+  const primaryDataset = validResults[0]?.payload ?? null;
   const availableChannels = primaryDataset?.channels ?? [];
   const unit = primaryDataset?.channel_units?.[metric] ?? "";
   const isBoolean = metric === "Brake";
@@ -326,7 +333,7 @@ export default function App() {
 
     try {
       const maxPointsValue = Number(form.maxPoints);
-      const payloads = await Promise.all(
+      const results = await Promise.all(
         selectedDrivers.map(async (driver) => {
           const url = new URL("/api/lap", API_BASE);
           url.searchParams.set("season", String(seasonValue));
@@ -337,14 +344,40 @@ export default function App() {
           if (Number.isFinite(maxPointsValue) && maxPointsValue > 0) {
             url.searchParams.set("max_points", String(maxPointsValue));
           }
-          return fetchJson<TelemetryResponse>(url.toString());
+          try {
+            const payload = await fetchJson<TelemetryResponse>(url.toString());
+            return { driver, payload, error: null } as DriverResult;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return { driver, payload: null, error: message } as DriverResult;
+          }
         })
       );
 
-      setDatasets(payloads);
-      setMetric((prev) => (payloads[0]?.channels.includes(prev) ? prev : payloads[0]?.channels[0] ?? ""));
-      setTone("ready");
-      setStatus("Telemetry loaded.");
+      setDriverResults(results);
+
+      const successful = results.filter((item) => item.payload !== null);
+      if (!successful.length) {
+        setTone("error");
+        const firstError = results[0]?.error ?? "No telemetry returned.";
+        setStatus(`Failed to load telemetry: ${firstError}`);
+        return;
+      }
+
+      const firstPayload = successful[0].payload!;
+      setMetric((prev) => (firstPayload.channels.includes(prev) ? prev : firstPayload.channels[0] ?? ""));
+      if (successful.length === results.length) {
+        setTone("ready");
+        setStatus("Telemetry loaded.");
+      } else {
+        const failed = results.filter((item) => item.payload === null);
+        setTone("error");
+        setStatus(
+          `Loaded ${successful.length}/${results.length} drivers. Failed: ${failed
+            .map((item) => `${item.driver} (${item.error})`)
+            .join("; ")}`
+        );
+      }
     } catch (error) {
       console.error(error);
       setTone("error");
@@ -358,15 +391,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!datasets.length || !chartRef.current || !metric) {
+    if (!driverResults.length || !chartRef.current || !metric) {
       return;
     }
 
-    const traces = datasets.map((payload, index) => {
-      const data = payload.data;
+    const traces = driverResults.map((result, index) => {
+      const color = DRIVER_COLORS[index % DRIVER_COLORS.length];
+      if (!result.payload) {
+        return {
+          x: [null],
+          y: [null],
+          mode: "lines",
+          name: `${result.driver} (failed)`,
+          line: {
+            color,
+            width: 2,
+            dash: "dot",
+          },
+          hovertemplate: `Driver ${result.driver}<br>Error: ${result.error}<extra></extra>`,
+          visible: "legendonly",
+        };
+      }
+
+      const data = result.payload.data;
       const distance = data.distance_m ?? [];
       const y = data[metric] ?? [];
-      const driver = payload.meta?.driver ?? `Driver ${index + 1}`;
+      const driver = result.payload.meta?.driver ?? result.driver;
 
       return {
         x: distance,
@@ -374,7 +424,7 @@ export default function App() {
         mode: "lines",
         name: driver,
         line: {
-          color: DRIVER_COLORS[index % DRIVER_COLORS.length],
+          color,
           width: 2,
           shape: isBoolean ? "hv" : "linear",
         },
@@ -384,8 +434,8 @@ export default function App() {
 
     let yMin = Infinity;
     let yMax = -Infinity;
-    datasets.forEach((payload) => {
-      const series = payload.data[metric] ?? [];
+    validResults.forEach((item) => {
+      const series = item.payload!.data[metric] ?? [];
       series.forEach((value) => {
         if (value < yMin) {
           yMin = value;
@@ -395,6 +445,11 @@ export default function App() {
         }
       });
     });
+
+    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+      yMin = 0;
+      yMax = 1;
+    }
 
     const corners = primaryDataset?.corners ?? [];
     const shapes =
@@ -454,7 +509,7 @@ export default function App() {
     };
 
     Plotly.react(chartRef.current, traces, layout, config);
-  }, [datasets, metric, unit, isBoolean, isGear, primaryDataset]);
+  }, [driverResults, validResults, metric, unit, isBoolean, isGear, primaryDataset]);
 
   return (
     <div className="app">
@@ -680,17 +735,23 @@ export default function App() {
               </div>
             </div>
             <div className="meta-drivers">
-              {datasets.map((payload) => (
-                <div className="meta-driver" key={payload.meta.driver}>
-                  <div className="meta-driver-title">{payload.meta.driver}</div>
-                  <div className="meta-row">
-                    <span>Lap</span>
-                    <span>{payload.meta.lap_number ?? "-"}</span>
-                  </div>
-                  <div className="meta-row">
-                    <span>Lap Time</span>
-                    <span>{payload.meta.lap_time ?? "-"}</span>
-                  </div>
+              {driverResults.map((result) => (
+                <div className="meta-driver" key={result.driver}>
+                  <div className="meta-driver-title">{result.driver}</div>
+                  {result.payload ? (
+                    <>
+                      <div className="meta-row">
+                        <span>Lap</span>
+                        <span>{result.payload.meta.lap_number ?? "-"}</span>
+                      </div>
+                      <div className="meta-row">
+                        <span>Lap Time</span>
+                        <span>{result.payload.meta.lap_time ?? "-"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="note">Load failed: {result.error}</div>
+                  )}
                 </div>
               ))}
             </div>
