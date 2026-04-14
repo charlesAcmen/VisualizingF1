@@ -1,0 +1,303 @@
+﻿import json
+import math
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import fastf1
+import pandas as pd
+
+
+CACHE_DIR = Path(__file__).resolve().parents[1] / ".fastf1_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+fastf1.Cache.enable_cache(str(CACHE_DIR))
+fastf1.set_log_level("WARNING")
+
+
+def format_lap_time(value):
+    if value is None or pd.isna(value):
+        return None
+    total_seconds = value.total_seconds()
+    minutes = int(total_seconds // 60)
+    seconds = total_seconds - minutes * 60
+    return f"{minutes}:{seconds:06.3f}"
+
+
+def downsample(df, max_points):
+    if not max_points or max_points <= 0:
+        return df
+    if len(df) <= max_points:
+        return df
+    step = max(1, math.ceil(len(df) / max_points))
+    return df.iloc[::step].copy()
+
+
+def resolve_event_name(event):
+    if event is None:
+        return None
+    try:
+        return event.get("EventName")
+    except AttributeError:
+        try:
+            return event["EventName"]
+        except Exception:
+            return str(event)
+
+
+def parse_max_points(params):
+    raw = params.get("max_points", [None])[0]
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    if raw == "":
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("max_points must be an integer.") from exc
+    if value <= 0:
+        return None
+    return value
+
+
+def load_session(season, gp, session_code, telemetry=False):
+    session = fastf1.get_session(season, gp, session_code)
+    session.load(telemetry=telemetry, weather=False, messages=False)
+    return session
+
+
+def build_corners(session):
+    try:
+        circuit_info = session.get_circuit_info()
+    except Exception:
+        return []
+    if circuit_info is None or not hasattr(circuit_info, "corners"):
+        return []
+
+    corners = []
+    for _, corner in circuit_info.corners.iterrows():
+        letter = corner.get("Letter") if hasattr(corner, "get") else corner["Letter"]
+        if pd.isna(letter):
+            letter = ""
+        corners.append(
+            {
+                "distance": float(corner["Distance"]),
+                "number": str(corner["Number"]),
+                "letter": str(letter),
+            }
+        )
+    return corners
+
+
+def build_payload(season, gp, session_code, driver, lap_selector, max_points):
+    session = load_session(season, gp, session_code, telemetry=True)
+
+    laps = session.laps.pick_drivers(driver)
+    if laps.empty:
+        raise ValueError(f"No laps found for driver '{driver}'.")
+
+    if str(lap_selector).lower() == "fastest":
+        lap = laps.pick_fastest()
+    else:
+        try:
+            lap_number = int(lap_selector)
+        except ValueError as exc:
+            raise ValueError("Lap must be 'fastest' or an integer.") from exc
+        lap = laps.pick_lap(lap_number)
+        if lap.empty:
+            raise ValueError(f"Lap {lap_number} not found for driver '{driver}'.")
+
+    car_data = lap.get_car_data().add_distance()
+    car_data = car_data[car_data["Distance"].notna()].copy()
+    car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
+    car_data = downsample(car_data, max_points)
+
+    channels = [
+        ("Speed", "km/h"),
+        ("Throttle", "%"),
+        ("Brake", "bool"),
+        ("RPM", "rpm"),
+        ("nGear", "gear"),
+    ]
+
+    data = {"distance_m": [round(float(val), 3) for val in car_data["Distance"].to_numpy()]}
+    channel_units = {}
+    for channel, unit in channels:
+        if channel not in car_data.columns:
+            continue
+        channel_units[channel] = unit
+        series = car_data[channel]
+        if channel in {"Brake", "nGear"}:
+            data[channel] = [int(val) for val in series.fillna(0).astype(int).to_numpy()]
+        else:
+            data[channel] = [round(float(val), 3) for val in series.fillna(0).to_numpy()]
+
+    lap_time = format_lap_time(lap.get("LapTime"))
+    lap_number_value = int(lap.get("LapNumber")) if not pd.isna(lap.get("LapNumber")) else None
+
+    meta = {
+        "season": season,
+        "event": resolve_event_name(session.event),
+        "session": session.name,
+        "driver": driver,
+        "lap_number": lap_number_value,
+        "lap_time": lap_time,
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+    return {
+        "meta": meta,
+        "channels": list(channel_units.keys()),
+        "channel_units": channel_units,
+        "data": data,
+        "corners": build_corners(session),
+    }
+
+
+def build_event_list(season):
+    schedule = fastf1.get_event_schedule(season)
+    events = []
+    for _, row in schedule.iterrows():
+        name = row.get("EventName") if hasattr(row, "get") else row["EventName"]
+        round_number = row.get("RoundNumber") if hasattr(row, "get") else row["RoundNumber"]
+        date_value = row.get("EventDate") if hasattr(row, "get") else row.get("EventDate", None)
+        if pd.isna(date_value):
+            date_value = None
+        date_iso = date_value.isoformat() if date_value is not None else None
+        events.append({"name": str(name), "round": int(round_number), "date": date_iso})
+    events.sort(key=lambda item: item["round"])
+    return events
+
+
+def build_driver_list(season, gp, session_code):
+    session = load_session(season, gp, session_code, telemetry=False)
+    drivers = sorted(session.laps["Driver"].dropna().unique().tolist())
+    return drivers
+
+
+def build_lap_list(season, gp, session_code, driver):
+    session = load_session(season, gp, session_code, telemetry=False)
+    laps = session.laps.pick_drivers(driver)
+    if laps.empty:
+        raise ValueError(f"No laps found for driver '{driver}'.")
+    lap_numbers = (
+        laps["LapNumber"].dropna().astype(int).sort_values().unique().tolist()
+    )
+    return lap_numbers
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _send_json(self, status, payload):
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/events":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2021])[0])
+                events = build_event_list(season)
+                self._send_json(200, {"season": season, "events": events})
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/drivers":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2021])[0])
+                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                session_code = params.get("session", ["Q"])[0]
+                drivers = build_driver_list(season, gp, session_code)
+                self._send_json(
+                    200,
+                    {"season": season, "event": gp, "session": session_code, "drivers": drivers},
+                )
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/laps":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2021])[0])
+                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                session_code = params.get("session", ["Q"])[0]
+                driver = params.get("driver", ["VER"])[0].upper()
+                laps = build_lap_list(season, gp, session_code, driver)
+                self._send_json(
+                    200,
+                    {
+                        "season": season,
+                        "event": gp,
+                        "session": session_code,
+                        "driver": driver,
+                        "laps": laps,
+                    },
+                )
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/lap":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2021])[0])
+                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                session_code = params.get("session", ["Q"])[0]
+                driver = params.get("driver", ["VER"])[0].upper()
+                lap_selector = params.get("lap", ["fastest"])[0]
+                max_points = parse_max_points(params)
+
+                payload = build_payload(
+                    season=season,
+                    gp=gp,
+                    session_code=session_code,
+                    driver=driver,
+                    lap_selector=lap_selector,
+                    max_points=max_points,
+                )
+                self._send_json(200, payload)
+            except Exception as exc:
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/health":
+            self._send_json(200, {"status": "ok"})
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+
+def main():
+    host = "0.0.0.0"
+    port = 8000
+    server = ThreadingHTTPServer((host, port), Handler)
+    print(f"FastF1 API server running on http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,18 @@
+node_modules/
+
+# FastF1 cache
+.fastf1_cache/
+
+# Build outputs
+dist/
+.vite/
+
+# Local data outputs (generated)
+data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
