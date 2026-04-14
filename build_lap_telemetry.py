@@ -47,9 +47,6 @@ def main():
     parser.add_argument("--driver", type=str, default="VER")
     parser.add_argument("--lap", type=str, default="fastest")
     parser.add_argument("--out", type=str, default=str(Path(__file__).parent / "data" / "lap_telemetry.json"))
-    parser.add_argument("--dedupe-distance", action="store_true", help="Drop duplicated distance rows.")
-    parser.add_argument("--fill-missing-with-zero", action="store_true", help="Fill missing values with zero.")
-    parser.add_argument("--round-decimals", type=int, default=-1, help="Round numeric values to N decimals (-1 keeps full precision).")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent
@@ -81,8 +78,6 @@ def main():
     car_data = lap.get_car_data()
     car_data = car_data.add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
-    if args.dedupe_distance:
-        car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
 
     channels = [
         ("Speed", "km/h"),
@@ -92,13 +87,7 @@ def main():
         ("nGear", "gear"),
     ]
 
-    if args.round_decimals >= 0:
-        distance_values = [
-            None if val is None else round(val, args.round_decimals)
-            for val in [float_or_none(v) for v in car_data["Distance"].to_numpy()]
-        ]
-    else:
-        distance_values = [float_or_none(v) for v in car_data["Distance"].to_numpy()]
+    distance_values = [float_or_none(v) for v in car_data["Distance"].to_numpy()]
     data = {"distance_m": distance_values}
     channel_units = {}
     for channel, unit in channels:
@@ -106,17 +95,12 @@ def main():
             continue
         channel_units[channel] = unit
         series = car_data[channel]
-        if args.fill_missing_with_zero:
-            series = series.fillna(0)
         if channel == "Brake":
             values = [int_or_none(val) for val in series.to_numpy()]
         elif channel == "nGear":
             values = [int_or_none(val) for val in series.to_numpy()]
         else:
             values = [float_or_none(val) for val in series.to_numpy()]
-
-        if args.round_decimals >= 0 and channel not in {"Brake", "nGear"}:
-            values = [None if val is None else round(val, args.round_decimals) for val in values]
         data[channel] = values
 
     lap_time = format_lap_time(lap.get("LapTime"))
