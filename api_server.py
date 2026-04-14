@@ -155,7 +155,7 @@ SESSION_NAME_TO_CODE = {
     "Practice 2": "FP2",
     "Practice 3": "FP3",
     "Qualifying": "Q",
-    "Sprint Qualifying": "S",
+    "Sprint Qualifying": "SQ",
     "Sprint": "S",
     "Sprint Race": "S",
     "Sprint Shootout": "SS",
