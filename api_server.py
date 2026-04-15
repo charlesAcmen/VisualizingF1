@@ -1,8 +1,10 @@
 ﻿import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections import OrderedDict
 from pathlib import Path
 from time import perf_counter
+from threading import Event, Lock
 import traceback
 from urllib.parse import parse_qs, urlparse
 
@@ -16,6 +18,11 @@ fastf1.Cache.enable_cache(str(CACHE_DIR))
 # Keep FastF1 loading logs visible in server console.
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s", force=True)
 fastf1.set_log_level("INFO")
+
+SESSION_CACHE = OrderedDict()
+SESSION_CACHE_LOCK = Lock()
+SESSION_CACHE_MAX_SIZE = 4
+SESSION_LOADING_EVENTS = {}
 
 
 def format_lap_time(value):
@@ -39,10 +46,51 @@ def resolve_event_name(event):
             return str(event)
 
 
-def load_session(season, gp, session_code, telemetry=False):
-    session = fastf1.get_session(season, gp, session_code)
-    session.load(telemetry=telemetry, weather=False, messages=False)
-    return session
+def load_session(season, gp, session_code):
+    key = (int(season), str(gp), str(session_code))
+    wait_event = None
+    is_loader = False
+
+    with SESSION_CACHE_LOCK:
+        cached_session = SESSION_CACHE.get(key)
+        if cached_session is not None:
+            SESSION_CACHE.move_to_end(key)
+            print(f"[CACHE] session hit {key}", flush=True)
+            return cached_session
+        if key in SESSION_LOADING_EVENTS:
+            wait_event = SESSION_LOADING_EVENTS[key]
+            print(f"[CACHE] session wait {key}", flush=True)
+        else:
+            wait_event = Event()
+            SESSION_LOADING_EVENTS[key] = wait_event
+            is_loader = True
+
+    if not is_loader:
+        wait_event.wait()
+        with SESSION_CACHE_LOCK:
+            cached_session = SESSION_CACHE.get(key)
+            if cached_session is not None:
+                SESSION_CACHE.move_to_end(key)
+                print(f"[CACHE] session hit-after-wait {key}", flush=True)
+                return cached_session
+        raise RuntimeError(f"Session load failed for {key}.")
+
+    try:
+        print(f"[CACHE] session miss {key}, loading with telemetry", flush=True)
+        session = fastf1.get_session(season, gp, session_code)
+        session.load(telemetry=True, weather=False, messages=False)
+        with SESSION_CACHE_LOCK:
+            SESSION_CACHE[key] = session
+            SESSION_CACHE.move_to_end(key)
+            while len(SESSION_CACHE) > SESSION_CACHE_MAX_SIZE:
+                evicted_key, _ = SESSION_CACHE.popitem(last=False)
+                print(f"[CACHE] session evicted {evicted_key}", flush=True)
+            return session
+    finally:
+        with SESSION_CACHE_LOCK:
+            event = SESSION_LOADING_EVENTS.pop(key, None)
+            if event is not None:
+                event.set()
 
 
 def build_corners(session):
@@ -69,7 +117,7 @@ def build_corners(session):
 
 
 def build_payload(season, gp, session_code, driver, lap_selector):
-    session = load_session(season, gp, session_code, telemetry=True)
+    session = load_session(season, gp, session_code)
 
     laps = session.laps.pick_drivers(driver)
     if laps.empty:
@@ -192,7 +240,7 @@ def build_session_list(season, gp):
 
 
 def build_driver_list(season, gp, session_code):
-    session = load_session(season, gp, session_code, telemetry=False)
+    session = load_session(season, gp, session_code)
     drivers = sorted(session.laps["Driver"].dropna().unique().tolist())
     driver_meta = {}
 
@@ -224,7 +272,7 @@ def build_driver_list(season, gp, session_code):
 
 
 def build_lap_list(season, gp, session_code, driver):
-    session = load_session(season, gp, session_code, telemetry=False)
+    session = load_session(season, gp, session_code)
     laps = session.laps.pick_drivers(driver)
     if laps.empty:
         raise ValueError(f"No laps found for driver '{driver}'.")
