@@ -619,7 +619,9 @@ export default function App() {
                       {selectedDrivers.length === drivers.length ? "Unselect All" : "Select All"}
                     </button>
                   </div>
-                  <div className="driver-loading-indicator">Loading drivers...</div>
+                  {drivers.length === 0 ? (
+                    <div className="driver-loading-indicator">Loading drivers...</div>
+                  ) : null}
                   <div className="driver-grid">
                     {drivers.map((driver) => {
                       const active = selectedDrivers.includes(driver);
