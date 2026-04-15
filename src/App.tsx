@@ -125,6 +125,7 @@ export default function App() {
   const eventsRequestIdRef = useRef(0);
   const sessionsRequestIdRef = useRef(0);
   const driversRequestIdRef = useRef(0);
+  const lapOptionsRef = useRef<Record<string, number[]>>({});
 
   const validResults = useMemo(
     () => driverResults.filter((item) => item.payload !== null),
@@ -314,6 +315,11 @@ export default function App() {
     });
   }, [selectedDrivers]);
 
+  // This useEffect keeps lapOptionsRef.current in sync with lapOptions state
+  useEffect(() => {
+    lapOptionsRef.current = lapOptions;
+  }, [lapOptions]);
+
   useEffect(() => {
     const seasonValue = Number(form.season);
     if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
@@ -321,7 +327,7 @@ export default function App() {
     }
 
     selectedDrivers.forEach((driver) => {
-      if (lapOptions[driver] !== undefined) {
+      if (lapOptionsRef.current[driver] !== undefined) {
         return;
       }
       (async () => {
@@ -353,7 +359,7 @@ export default function App() {
         }
       })();
     });
-  }, [selectedDrivers, form.season, form.gp, form.session, lapOptions]);
+  }, [selectedDrivers, form.season, form.gp, form.session]);
 
   async function loadTelemetry() {
     if (!selectedDrivers.length) {

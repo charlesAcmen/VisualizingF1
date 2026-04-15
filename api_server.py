@@ -313,6 +313,8 @@ class Handler(BaseHTTPRequestHandler):
                 events = build_event_list(season)
                 self._send_json(200, {"season": season, "events": events})
             except Exception as exc:
+                print(f"[API] /api/events error: {exc}", flush=True)
+                traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
 
@@ -334,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             except Exception as exc:
+                print(f"[API] /api/drivers error: {exc}", flush=True)
+                traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
 
@@ -348,6 +352,8 @@ class Handler(BaseHTTPRequestHandler):
                     {"season": season, "event": gp, "sessions": sessions},
                 )
             except Exception as exc:
+                print(f"[API] /api/sessions error: {exc}", flush=True)
+                traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
 
@@ -370,6 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             except Exception as exc:
+                print(f"[API] /api/laps error: {exc}", flush=True)
+                traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
 
