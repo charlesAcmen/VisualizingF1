@@ -24,6 +24,10 @@ SESSION_CACHE_LOCK = Lock()
 SESSION_CACHE_MAX_SIZE = 4
 SESSION_LOADING_EVENTS = {}
 
+# Constants for testing event patterns
+TESTING_EVENT_PATTERN_1 = "PRE-SEASON TESTING 1"
+TESTING_EVENT_PATTERN_2 = "PRE-SEASON TESTING 2"
+
 
 def format_lap_time(value):
     if value is None or pd.isna(value):
@@ -49,27 +53,23 @@ def resolve_event_name(event):
 def is_testing_event(season, gp):
     """Check if an event is a testing event."""
     try:
-        # Try to get event schedule and check if it's a testing event
         schedule = fastf1.get_event_schedule(season)
         for _, event in schedule.iterrows():
             if (event['EventName'] == gp or 
                 (isinstance(gp, str) and gp.lower() in event['EventName'].lower())):
-                # Check if it's a testing event (Round 0 or contains 'Testing')
                 return (event['RoundNumber'] == 0 or 
                        'Testing' in str(event['EventName']))
         return False
     except Exception:
-        # Fallback: check if gp name contains 'Testing'
         return 'Testing' in str(gp)
 
 
 def get_testing_event_number(season, gp):
-    """Get the testing event number (1 or 2) for a given testing event."""
+    """Get testing event number (1 or 2) for a given testing event."""
     try:
         if not is_testing_event(season, gp):
             return None
         
-        # For testing events, we need to determine which testing week it is
         schedule = fastf1.get_event_schedule(season)
         testing_events = []
         
@@ -77,37 +77,23 @@ def get_testing_event_number(season, gp):
             if event['RoundNumber'] == 0 or 'Testing' in str(event['EventName']):
                 testing_events.append(event)
         
-        # Try multiple matching strategies for testing events
+        # Match by exact name first
         for i, event in enumerate(testing_events, 1):
-            # Strategy 1: Exact name match
             if event['EventName'] == gp:
                 return i
-            
-            # Strategy 2: Official name match
             if 'OfficialEventName' in event and event['OfficialEventName'] == gp:
                 return i
-            
-            # Strategy 3: Partial name match (case insensitive)
-            if (isinstance(gp, str) and isinstance(event['EventName'], str) and 
-                gp.lower() in event['EventName'].lower()):
-                return i
-            
-            # Strategy 4: Official name partial match
-            if ('OfficialEventName' in event and isinstance(gp, str) and isinstance(event['OfficialEventName'], str) and 
-                gp.lower() in event['OfficialEventName'].lower()):
-                return i
         
-        # If no match found, try to match by date if the gp contains date info
+        # Match by string patterns
         if isinstance(gp, str):
-            for i, event in enumerate(testing_events, 1):
-                if 'PRE-SEASON TESTING 1' in gp:
-                    return 1
-                elif 'PRE-SEASON TESTING 2' in gp:
-                    return 2
+            if TESTING_EVENT_PATTERN_1 in gp:
+                return 1
+            elif TESTING_EVENT_PATTERN_2 in gp:
+                return 2
         
-        return 1  # Default to first testing event if not found
+        return 1
     except Exception:
-        return 1  # Default to first testing event on error
+        return 1
 
 
 def load_session(season, gp, session_code):
@@ -142,34 +128,20 @@ def load_session(season, gp, session_code):
     try:
         print(f"[CACHE] session miss {key}, loading with telemetry", flush=True)
         
-        # Check if this is a testing event - use direct detection to avoid name correction
+        # Check if this is a testing event
         testing_event_num = None
         session_number = None
         
-        # Try to detect if this is a testing event by checking the gp name directly
-        if (isinstance(gp, str) and ('PRE-SEASON TESTING' in gp or 'Testing' in gp)):
-            # Extract testing event number from gp name
-            if 'PRE-SEASON TESTING 1' in gp:
-                testing_event_num = 1
-            elif 'PRE-SEASON TESTING 2' in gp:
-                testing_event_num = 2
-            else:
-                testing_event_num = get_testing_event_number(season, gp)
+        if is_testing_event(season, gp):
+            testing_event_num = get_testing_event_number(season, gp)
             
-            # Parse session code for testing events (T11, T12, T13 for week 1, T21, T22, T23 for week 2)
+            # Parse session code for testing events (T11, T12, T13, T21, T22, T23)
             if session_code.startswith('T') and len(session_code) == 3:
                 try:
-                    session_number = int(session_code[2])  # Last digit is session number
+                    session_number = int(session_code[2])
                 except ValueError:
                     session_number = 1
-            elif session_code == 'FP1':
-                session_number = 1
-            elif session_code == 'FP2':
-                session_number = 2
-            elif session_code == 'FP3':
-                session_number = 3
             else:
-                # Default to first session for testing
                 session_number = 1
             
             session = fastf1.get_testing_session(season, testing_event_num, session_number)
@@ -298,20 +270,8 @@ def build_event_list(season):
         date_iso = date_value.isoformat() if date_value is not None else None
         
         # Determine event type and proper name
-        event_type = "race"
-        display_name = str(name)
-        
-        if round_number == 0 or "Testing" in str(name):
-            event_type = "testing"
-            testing_event_count += 1
-            
-            # Use official name for testing events to distinguish them
-            if official_name and "PRE-SEASON TESTING" in str(official_name):
-                display_name = str(official_name)
-            else:
-                # Fallback: add numbering to distinguish testing events
-                if testing_event_count > 1:
-                    display_name = f"Pre-Season Testing {testing_event_count}"
+        event_type = "testing" if round_number == 0 or "Testing" in str(name) else "race"
+        display_name = str(official_name) if (official_name and "PRE-SEASON TESTING" in str(official_name)) else str(name)
         
         events.append({
             "name": display_name, 
@@ -363,17 +323,8 @@ def build_session_list(season, gp):
             continue
 
         # For testing events, modify session names to be more descriptive
-        # Use direct detection to avoid FastF1 name correction issues
-        is_testing = (isinstance(gp, str) and ('PRE-SEASON TESTING' in gp or 'Testing' in gp))
-        
-        if is_testing:
-            # Extract testing event number from gp name
-            if 'PRE-SEASON TESTING 1' in gp:
-                testing_event_num = 1
-            elif 'PRE-SEASON TESTING 2' in gp:
-                testing_event_num = 2
-            else:
-                testing_event_num = get_testing_event_number(season, gp)
+        if is_testing_event(season, gp):
+            testing_event_num = get_testing_event_number(season, gp)
             
             if name == "Practice 1":
                 name = f"Testing Week {testing_event_num} - Day 1 Morning"
@@ -381,8 +332,8 @@ def build_session_list(season, gp):
                 name = f"Testing Week {testing_event_num} - Day 1 Afternoon"
             elif name == "Practice 3":
                 name = f"Testing Week {testing_event_num} - Day 2 Morning"
-            # Add more descriptive names for testing sessions
-            code = f"T{testing_event_num}{idx}"  # Use T11, T12, T13 for week 1, T21, T22, T23 for week 2
+            
+            code = f"T{testing_event_num}{idx}"
         else:
             code = SESSION_NAME_TO_CODE.get(name)
         
