@@ -115,6 +115,7 @@ export default function App() {
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>([]);
   const [lapOptions, setLapOptions] = useState<Record<string, number[]>>({});
   const [lapSelection, setLapSelection] = useState<Record<string, string>>({});
+  const [driversLoading, setDriversLoading] = useState<boolean>(false);
   const [bulkLapMode, setBulkLapMode] = useState<"fastest" | "number">("fastest");
   const [bulkLapNumber, setBulkLapNumber] = useState<string>("");
   const [driverResults, setDriverResults] = useState<DriverResult[]>([]);
@@ -250,6 +251,7 @@ export default function App() {
       setDrivers([]);
       setDriverMeta({});
       setSelectedDrivers([]);
+      setDriversLoading(false);
       return;
     }
 
@@ -259,6 +261,7 @@ export default function App() {
     setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
+    setDriversLoading(true);
 
     (async () => {
       try {
@@ -276,11 +279,7 @@ export default function App() {
         setDriverMeta(payload.driver_meta ?? {});
         setDrivers(driverList);
         setSelectedDrivers((prev) => {
-          const filtered = prev.filter((driver) => driverList.includes(driver));
-          if (!filtered.length && driverList.length) {
-            return [driverList[0]];
-          }
-          return filtered;
+          return prev.filter((driver) => driverList.includes(driver));
         });
       } catch (error) {
         console.error(error);
@@ -290,6 +289,10 @@ export default function App() {
         setDrivers([]);
         setDriverMeta({});
         setSelectedDrivers([]);
+      } finally {
+        if (requestId === driversRequestIdRef.current) {
+          setDriversLoading(false);
+        }
       }
     })();
   }, [form.season, form.gp, form.session]);
@@ -604,7 +607,9 @@ export default function App() {
             </div>
             <div className="field">
               <span className="label">Drivers</span>
-              {driversDisabled ? (
+              {driversLoading ? (
+                <div className="note">Loading drivers...</div>
+              ) : driversDisabled ? (
                 <div className="note">No drivers loaded yet (check season/event/session).</div>
               ) : (
                 <div className="driver-select-wrap">
@@ -619,9 +624,6 @@ export default function App() {
                       {selectedDrivers.length === drivers.length ? "Unselect All" : "Select All"}
                     </button>
                   </div>
-                  {drivers.length === 0 ? (
-                    <div className="driver-loading-indicator">Loading drivers...</div>
-                  ) : null}
                   <div className="driver-grid">
                     {drivers.map((driver) => {
                       const active = selectedDrivers.includes(driver);
