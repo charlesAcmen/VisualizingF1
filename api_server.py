@@ -217,8 +217,8 @@ def build_corners(session):
     return corners
 
 
-def build_payload(season, gp, session_code, driver, lap_selector):
-    session = load_session(season, gp, session_code)
+def build_payload(season, event_name, session_code, driver, lap_selector):
+    session = load_session(season, event_name, session_code)
 
     laps = session.laps.pick_drivers(driver)
     if laps.empty:
@@ -266,10 +266,13 @@ def build_payload(season, gp, session_code, driver, lap_selector):
     lap_number_raw = lap_row.get("LapNumber")
     lap_number_value = int(lap_number_raw) if not pd.isna(lap_number_raw) else None
 
+    # Get display session name to match Query section
+    display_session_name = get_display_session_name(season, event_name, session.name, session_code)
+
     meta = {
         "season": season,
         "event": resolve_event_name(session.event),
-        "session": session.name,
+        "session": display_session_name,
         "driver": driver,
         "lap_number": lap_number_value,
         "lap_time": lap_time,
@@ -287,7 +290,6 @@ def build_payload(season, gp, session_code, driver, lap_selector):
 def build_event_list(season):
     schedule = fastf1.get_event_schedule(season)
     events = []
-    testing_event_count = 0
     
     for _, row in schedule.iterrows():
         name = row.get("EventName") if hasattr(row, "get") else row["EventName"]
@@ -301,7 +303,13 @@ def build_event_list(season):
         
         # Determine event type and proper name
         event_type = "testing" if round_number == 0 or "Testing" in str(name) else "race"
-        display_name = str(official_name) if (official_name and "PRE-SEASON TESTING" in str(official_name)) else str(name)
+        
+        # For testing events, prefer OfficialEventName if it contains "PRE-SEASON TESTING"
+        # For race events, always use EventName for consistency
+        if event_type == "testing" and official_name and "PRE-SEASON TESTING" in str(official_name):
+            display_name = str(official_name)
+        else:
+            display_name = str(name)
         
         events.append({
             "name": display_name, 
@@ -327,15 +335,34 @@ SESSION_NAME_TO_CODE = {
 }
 
 
-def build_session_list(season, gp):
+def get_display_session_name(season, event_name, session_name, session_code):
+    """Get the display session name that matches what's shown in Query section."""
+    if is_testing_event(season, event_name):
+        testing_event_num = get_testing_event_number(season, event_name)
+        
+        # Match the same logic as build_session_list
+        if session_name == "Practice 1":
+            return f"Day 1 (T{testing_event_num}1)"
+        elif session_name == "Practice 2":
+            return f"Day 2 (T{testing_event_num}2)"
+        elif session_name == "Practice 3":
+            return f"Day 3 (T{testing_event_num}3)"
+        else:
+            return f"{session_name} (T{testing_event_num}{session_code[-1]})"
+    else:
+        # For race events, return the standard name with code
+        return f"{session_name} ({session_code})"
+
+
+def build_session_list(season, event_name):
     # Check if this is a testing event
-    if is_testing_event(season, gp):
+    if is_testing_event(season, event_name):
         # For testing events, always use get_testing_event with the correct event number
-        testing_event_num = get_testing_event_number(season, gp)
+        testing_event_num = get_testing_event_number(season, event_name)
         event = fastf1.get_testing_event(season, testing_event_num)
     else:
         # Regular race event
-        event = fastf1.get_event(season, gp)
+        event = fastf1.get_event(season, event_name)
     
     sessions = []
     seen_codes = set()
@@ -353,15 +380,18 @@ def build_session_list(season, gp):
             continue
 
         # For testing events, modify session names to be more descriptive
-        if is_testing_event(season, gp):
-            testing_event_num = get_testing_event_number(season, gp)
+        if is_testing_event(season, event_name):
+            testing_event_num = get_testing_event_number(season, event_name)
             
+            # Create more descriptive names for testing sessions
             if name == "Practice 1":
-                name = f"Testing Week {testing_event_num} - Day 1 Morning"
+                name = f"Day 1 (T{testing_event_num}1)"
             elif name == "Practice 2":
-                name = f"Testing Week {testing_event_num} - Day 1 Afternoon"
+                name = f"Day 2 (T{testing_event_num}2)"
             elif name == "Practice 3":
-                name = f"Testing Week {testing_event_num} - Day 2 Morning"
+                name = f"Day 3 (T{testing_event_num}3)"
+            else:
+                name = f"{name} (T{testing_event_num}{idx})"
             
             code = f"T{testing_event_num}{idx}"
         else:
@@ -377,8 +407,8 @@ def build_session_list(season, gp):
     return sessions
 
 
-def build_driver_list(season, gp, session_code):
-    session = load_session(season, gp, session_code)
+def build_driver_list(season, event_name, session_code):
+    session = load_session(season, event_name, session_code)
     drivers = sorted(session.laps["Driver"].dropna().unique().tolist())
     driver_meta = {}
 
@@ -409,8 +439,8 @@ def build_driver_list(season, gp, session_code):
     return drivers, driver_meta
 
 
-def build_lap_list(season, gp, session_code, driver):
-    session = load_session(season, gp, session_code)
+def build_lap_list(season, event_name, session_code, driver):
+    session = load_session(season, event_name, session_code)
     laps = session.laps.pick_drivers(driver)
     if laps.empty:
         raise ValueError(f"No laps found for driver '{driver}'.")
@@ -460,14 +490,14 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 season = int(params.get("season", [2021])[0])
-                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                event_name = params.get("event", ["Spanish Grand Prix"])[0]
                 session_code = params.get("session", ["Q"])[0]
-                drivers, driver_meta = build_driver_list(season, gp, session_code)
+                drivers, driver_meta = build_driver_list(season, event_name, session_code)
                 self._send_json(
                     200,
                     {
                         "season": season,
-                        "event": gp,
+                        "event": event_name,
                         "session": session_code,
                         "drivers": drivers,
                         "driver_meta": driver_meta,
@@ -483,11 +513,11 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 season = int(params.get("season", [2021])[0])
-                gp = params.get("gp", ["Spanish Grand Prix"])[0]
-                sessions = build_session_list(season, gp)
+                event_name = params.get("event", ["Spanish Grand Prix"])[0]
+                sessions = build_session_list(season, event_name)
                 self._send_json(
                     200,
-                    {"season": season, "event": gp, "sessions": sessions},
+                    {"season": season, "event": event_name, "sessions": sessions},
                 )
             except Exception as exc:
                 print(f"[API] /api/sessions error: {exc}", flush=True)
@@ -499,15 +529,15 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 season = int(params.get("season", [2021])[0])
-                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                event_name = params.get("event", ["Spanish Grand Prix"])[0]
                 session_code = params.get("session", ["Q"])[0]
                 driver = params.get("driver", ["VER"])[0].upper()
-                laps = build_lap_list(season, gp, session_code, driver)
+                laps = build_lap_list(season, event_name, session_code, driver)
                 self._send_json(
                     200,
                     {
                         "season": season,
-                        "event": gp,
+                        "event": event_name,
                         "session": session_code,
                         "driver": driver,
                         "laps": laps,
@@ -523,19 +553,19 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             try:
                 season = int(params.get("season", [2021])[0])
-                gp = params.get("gp", ["Spanish Grand Prix"])[0]
+                event_name = params.get("event", ["Spanish Grand Prix"])[0]
                 session_code = params.get("session", ["Q"])[0]
                 driver = params.get("driver", ["VER"])[0].upper()
                 lap_selector = params.get("lap", ["fastest"])[0]
                 started = perf_counter()
                 print(
-                    f"[API] /api/lap season={season} gp={gp} session={session_code} driver={driver} lap={lap_selector}",
+                    f"[API] /api/lap season={season} event={event_name} session={session_code} driver={driver} lap={lap_selector}",
                     flush=True,
                 )
 
                 payload = build_payload(
                     season=season,
-                    gp=gp,
+                    event_name=event_name,
                     session_code=session_code,
                     driver=driver,
                     lap_selector=lap_selector,

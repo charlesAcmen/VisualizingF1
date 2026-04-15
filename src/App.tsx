@@ -63,7 +63,7 @@ type DriverMeta = {
 
 type FormState = {
   season: string;
-  gp: string;
+  event: string;
   session: string;
 };
 
@@ -72,7 +72,7 @@ const SEASON_OPTIONS = Array.from({ length: CURRENT_YEAR - 2018 + 1 }, (_, idx) 
 
 const defaultForm: FormState = {
   season: String(CURRENT_YEAR),
-  gp: "",
+  event: "",
   session: "",
 };
 
@@ -115,7 +115,6 @@ export default function App() {
   const [selectedDrivers, setSelectedDrivers] = useState<string[]>([]);
   const [lapOptions, setLapOptions] = useState<Record<string, number[]>>({});
   const [lapSelection, setLapSelection] = useState<Record<string, string>>({});
-  const [driversLoading, setDriversLoading] = useState<boolean>(false);
   const [bulkLapMode, setBulkLapMode] = useState<"fastest" | "number">("fastest");
   const [bulkLapNumber, setBulkLapNumber] = useState<string>("");
   const [driverResults, setDriverResults] = useState<DriverResult[]>([]);
@@ -140,7 +139,6 @@ export default function App() {
   const unit = primaryDataset?.channel_units?.[metric] ?? "";
   const isBoolean = metric === "Brake";
   const isGear = metric === "nGear";
-  const driversDisabled = drivers.length === 0;
 
   function getDriverColor(driver: string, index: number) {
     const dynamic = driverMeta[driver]?.team_color;
@@ -176,11 +174,11 @@ export default function App() {
         const eventList = payload.events ?? [];
         setEvents(eventList);
         setForm((prev) => {
-          const nextGp =
-            eventList.some((event) => event.name === prev.gp)
-              ? prev.gp
+          const nextEvent =
+            eventList.some((event) => event.name === prev.event)
+              ? prev.event
               : (eventList[0]?.name ?? "");
-          return { ...prev, gp: nextGp, session: "" };
+          return { ...prev, event: nextEvent, session: "" };
         });
       } catch (error) {
         console.error(error);
@@ -198,7 +196,7 @@ export default function App() {
 
   useEffect(() => {
     const seasonValue = Number(form.season);
-    if (!Number.isFinite(seasonValue) || !form.gp) {
+    if (!Number.isFinite(seasonValue) || !form.event) {
       setSessions([]);
       setDrivers([]);
       setDriverMeta({});
@@ -218,7 +216,7 @@ export default function App() {
       try {
         const url = new URL("/api/sessions", API_BASE);
         url.searchParams.set("season", String(seasonValue));
-        url.searchParams.set("gp", form.gp);
+        url.searchParams.set("event", form.event);
         const payload = await fetchJson<{ sessions: SessionOption[] }>(url.toString());
         if (requestId !== sessionsRequestIdRef.current) {
           return;
@@ -243,15 +241,14 @@ export default function App() {
         setSelectedDrivers([]);
       }
     })();
-  }, [form.season, form.gp]);
+  }, [form.season, form.event]);
 
   useEffect(() => {
     const seasonValue = Number(form.season);
-    if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
+    if (!Number.isFinite(seasonValue) || !form.event || !form.session) {
       setDrivers([]);
       setDriverMeta({});
       setSelectedDrivers([]);
-      setDriversLoading(false);
       return;
     }
 
@@ -261,13 +258,12 @@ export default function App() {
     setSelectedDrivers([]);
     setLapOptions({});
     setLapSelection({});
-    setDriversLoading(true);
 
     (async () => {
       try {
         const url = new URL("/api/drivers", API_BASE);
         url.searchParams.set("season", String(seasonValue));
-        url.searchParams.set("gp", form.gp);
+        url.searchParams.set("event", form.event);
         url.searchParams.set("session", form.session);
         const payload = await fetchJson<{ drivers: string[]; driver_meta?: Record<string, DriverMeta> }>(
           url.toString()
@@ -289,13 +285,9 @@ export default function App() {
         setDrivers([]);
         setDriverMeta({});
         setSelectedDrivers([]);
-      } finally {
-        if (requestId === driversRequestIdRef.current) {
-          setDriversLoading(false);
-        }
       }
     })();
-  }, [form.season, form.gp, form.session]);
+  }, [form.season, form.event, form.session]);
 
   useEffect(() => {
     setLapOptions((prev) => {
@@ -325,7 +317,7 @@ export default function App() {
 
   useEffect(() => {
     const seasonValue = Number(form.season);
-    if (!Number.isFinite(seasonValue) || !form.gp || !form.session) {
+    if (!Number.isFinite(seasonValue) || !form.event || !form.session) {
       return;
     }
 
@@ -337,7 +329,7 @@ export default function App() {
         try {
           const url = new URL("/api/laps", API_BASE);
           url.searchParams.set("season", String(seasonValue));
-          url.searchParams.set("gp", form.gp);
+          url.searchParams.set("event", form.event);
           url.searchParams.set("session", form.session);
           url.searchParams.set("driver", driver);
           const payload = await fetchJson<{ laps: number[] }>(url.toString());
@@ -362,7 +354,7 @@ export default function App() {
         }
       })();
     });
-  }, [selectedDrivers, form.season, form.gp, form.session]);
+  }, [selectedDrivers, form.season, form.event, form.session]);
 
   async function loadTelemetry() {
     if (!selectedDrivers.length) {
@@ -386,7 +378,7 @@ export default function App() {
         selectedDrivers.map(async (driver) => {
           const url = new URL("/api/lap", API_BASE);
           url.searchParams.set("season", String(seasonValue));
-          url.searchParams.set("gp", form.gp);
+          url.searchParams.set("event", form.event);
           url.searchParams.set("session", form.session);
           url.searchParams.set("driver", driver);
           url.searchParams.set("lap", lapSelection[driver] ?? "fastest");
@@ -580,8 +572,8 @@ export default function App() {
             <div className="field">
               <span className="label">Event</span>
               <select
-                value={form.gp}
-                onChange={(event) => setForm({ ...form, gp: event.target.value })}
+                value={form.event}
+                onChange={(event) => setForm({ ...form, event: event.target.value })}
                 disabled={events.length === 0}
               >
                 {events.map((event) => (
@@ -598,19 +590,22 @@ export default function App() {
                 onChange={(event) => setForm({ ...form, session: event.target.value })}
                 disabled={sessions.length === 0}
               >
-                {sessions.map((session) => (
-                  <option key={session.code} value={session.code}>
-                    {session.name} ({session.code})
-                  </option>
-                ))}
+                {sessions.map((session) => {
+                  const displayName = session.name.includes(`(${session.code})`) 
+                    ? session.name 
+                    : `${session.name} (${session.code})`;
+                  return (
+                    <option key={session.code} value={session.code}>
+                      {displayName}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="field">
               <span className="label">Drivers</span>
-              {driversLoading ? (
+              {drivers.length === 0 ? (
                 <div className="note">Loading drivers...</div>
-              ) : driversDisabled ? (
-                <div className="note">No drivers loaded yet (check season/event/session).</div>
               ) : (
                 <div className="driver-select-wrap">
                   <div className="driver-actions">
