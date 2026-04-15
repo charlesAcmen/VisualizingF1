@@ -25,8 +25,13 @@ SESSION_CACHE_MAX_SIZE = 4
 SESSION_LOADING_EVENTS = {}
 
 # Constants for testing event patterns
-TESTING_EVENT_PATTERN_1 = "PRE-SEASON TESTING 1"
-TESTING_EVENT_PATTERN_2 = "PRE-SEASON TESTING 2"
+TESTING_PATTERNS = [
+    "PRE-SEASON TESTING",
+    "PRE-SEASON TEST",
+    "PRE-SEASON TRACK SESSION",
+    "Testing",
+    "Test"
+]
 
 
 def format_lap_time(value):
@@ -53,13 +58,12 @@ def resolve_event_name(event):
 def is_testing_event(season, gp):
     """Check if an event is a testing event."""
     try:
-        # First check if gp name contains testing patterns
+        # First check if gp name contains any testing patterns
         if isinstance(gp, str):
-            if (TESTING_EVENT_PATTERN_1 in gp or 
-                TESTING_EVENT_PATTERN_2 in gp or 
-                'Testing' in gp or 
-                'PRE-SEASON' in gp):
-                return True
+            gp_lower = gp.lower()
+            for pattern in TESTING_PATTERNS:
+                if pattern.lower() in gp_lower:
+                    return True
         
         # Then check schedule for exact matches
         schedule = fastf1.get_event_schedule(season)
@@ -83,7 +87,7 @@ def is_testing_event(season, gp):
 
 
 def get_testing_event_number(season, gp):
-    """Get testing event number (1 or 2) for a given testing event."""
+    """Get testing event number (1, 2, or 3) for a given testing event."""
     try:
         if not is_testing_event(season, gp):
             return None
@@ -95,19 +99,21 @@ def get_testing_event_number(season, gp):
             if event['RoundNumber'] == 0 or 'Testing' in str(event['EventName']):
                 testing_events.append(event)
         
-        # Match by string patterns first (most reliable for testing events)
-        if isinstance(gp, str):
-            if TESTING_EVENT_PATTERN_1 in gp:
-                return 1
-            elif TESTING_EVENT_PATTERN_2 in gp:
-                return 2
-        
-        # Match by exact name
+        # Match by exact name first
         for i, event in enumerate(testing_events, 1):
             if event['EventName'] == gp:
                 return i
             if 'OfficialEventName' in event and event['OfficialEventName'] == gp:
                 return i
+        
+        # Match by official name patterns
+        if isinstance(gp, str):
+            gp_lower = gp.lower()
+            for i, event in enumerate(testing_events, 1):
+                if 'OfficialEventName' in event:
+                    official_name = str(event['OfficialEventName']).lower()
+                    if gp_lower in official_name:
+                        return i
         
         # Match by partial name
         for i, event in enumerate(testing_events, 1):
