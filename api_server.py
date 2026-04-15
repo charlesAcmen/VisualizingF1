@@ -46,6 +46,23 @@ def resolve_event_name(event):
             return str(event)
 
 
+def is_testing_event(season, gp):
+    """Check if an event is a testing event."""
+    try:
+        # Try to get event schedule and check if it's a testing event
+        schedule = fastf1.get_event_schedule(season)
+        for _, event in schedule.iterrows():
+            if (event['EventName'] == gp or 
+                (isinstance(gp, str) and gp.lower() in event['EventName'].lower())):
+                # Check if it's a testing event (Round 0 or contains 'Testing')
+                return (event['RoundNumber'] == 0 or 
+                       'Testing' in str(event['EventName']))
+        return False
+    except Exception:
+        # Fallback: check if gp name contains 'Testing'
+        return 'Testing' in str(gp)
+
+
 def load_session(season, gp, session_code):
     key = (int(season), str(gp), str(session_code))
     wait_event = None
@@ -77,7 +94,27 @@ def load_session(season, gp, session_code):
 
     try:
         print(f"[CACHE] session miss {key}, loading with telemetry", flush=True)
-        session = fastf1.get_session(season, gp, session_code)
+        
+        # Check if this is a testing event
+        if is_testing_event(season, gp):
+            # For testing events, use get_testing_session
+            # Convert session_code to session number for testing sessions
+            session_number = None
+            if session_code == 'FP1':
+                session_number = 1
+            elif session_code == 'FP2':
+                session_number = 2
+            elif session_code == 'FP3':
+                session_number = 3
+            else:
+                # Default to first session for testing
+                session_number = 1
+            
+            session = fastf1.get_testing_session(season, 1, session_number)
+        else:
+            # Regular race event
+            session = fastf1.get_session(season, gp, session_code)
+        
         session.load(telemetry=True, weather=False, messages=False)
         with SESSION_CACHE_LOCK:
             SESSION_CACHE[key] = session
@@ -193,7 +230,18 @@ def build_event_list(season):
         if pd.isna(date_value):
             date_value = None
         date_iso = date_value.isoformat() if date_value is not None else None
-        events.append({"name": str(name), "round": int(round_number), "date": date_iso})
+        
+        # Determine event type
+        event_type = "race"
+        if round_number == 0 or "Testing" in str(name):
+            event_type = "testing"
+        
+        events.append({
+            "name": str(name), 
+            "round": int(round_number), 
+            "date": date_iso,
+            "type": event_type
+        })
     events.sort(key=lambda item: item["round"])
     return events
 
@@ -212,7 +260,18 @@ SESSION_NAME_TO_CODE = {
 
 
 def build_session_list(season, gp):
-    event = fastf1.get_event(season, gp)
+    # Check if this is a testing event
+    if is_testing_event(season, gp):
+        # For testing events, use get_testing_event
+        try:
+            event = fastf1.get_testing_event(season, 1)
+        except Exception:
+            # Fallback to regular event if testing event fails
+            event = fastf1.get_event(season, gp)
+    else:
+        # Regular race event
+        event = fastf1.get_event(season, gp)
+    
     sessions = []
     seen_codes = set()
 
@@ -225,10 +284,22 @@ def build_session_list(season, gp):
             continue
 
         name = str(raw_name).strip()
-        if not name:
+        if not name or name == "None":
             continue
 
-        code = SESSION_NAME_TO_CODE.get(name)
+        # For testing events, modify session names to be more descriptive
+        if is_testing_event(season, gp):
+            if name == "Practice 1":
+                name = "Testing Day 1 - Morning"
+            elif name == "Practice 2":
+                name = "Testing Day 1 - Afternoon"
+            elif name == "Practice 3":
+                name = "Testing Day 2 - Morning"
+            # Add more descriptive names for testing sessions
+            code = f"T{idx}"  # Use T1, T2, etc. for testing sessions
+        else:
+            code = SESSION_NAME_TO_CODE.get(name)
+        
         if code is None:
             continue
         if code in seen_codes:
