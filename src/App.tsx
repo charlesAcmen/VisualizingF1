@@ -575,7 +575,7 @@ export default function App() {
               </select>
             </div>
             <div className="field">
-              <span className="label">Grand Prix</span>
+              <span className="label">Event</span>
               <select
                 value={form.gp}
                 onChange={(event) => setForm({ ...form, gp: event.target.value })}
@@ -619,6 +619,7 @@ export default function App() {
                       {selectedDrivers.length === drivers.length ? "Unselect All" : "Select All"}
                     </button>
                   </div>
+                  <div className="driver-loading-indicator">Loading drivers...</div>
                   <div className="driver-grid">
                     {drivers.map((driver) => {
                       const active = selectedDrivers.includes(driver);
