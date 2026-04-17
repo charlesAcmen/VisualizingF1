@@ -13,7 +13,7 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
     - Build KD-tree with comparison driver XYZ coordinates
     - For each point in reference driver, find k nearest neighbors in comparison driver
     - Use inverse distance weighting to estimate comparison driver speed at reference point
-    - Speed difference = reference_speed - estimated_comparison_speed
+    - Speed difference = estimated_comparison_speed - reference_speed
     - X-axis uses reference driver's Distance
     
     Args:
@@ -71,9 +71,9 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
         # Weighted average of neighbor speeds
         comp_speeds_estimated[i] = np.sum(weights * neighbor_speeds)
 
-    # Calculate speed differences (reference speed - estimated comparison speed)
+    # Calculate speed differences (estimated comparison speed - reference speed)
     speed_diffs = np.full(len(ref_coords), np.nan)
-    speed_diffs[valid_matches] = ref_speeds[valid_matches] - comp_speeds_estimated[valid_matches]
+    speed_diffs[valid_matches] = comp_speeds_estimated[valid_matches] - ref_speeds[valid_matches]
 
     # Calculate statistics
     valid_diffs = speed_diffs[~np.isnan(speed_diffs)]
