@@ -13,9 +13,9 @@ class SpeedDifferenceCalculator:
     
     Algorithm:
     1. Use the driver with most points as reference
-    2. Upscale other drivers to match reference point count using interpolation
-    3. Build KD-tree with reference driver's XYZ coordinates
-    4. For each point in other drivers, find k nearest neighbors in reference
+    2. Resample all drivers to the same frequency (no interpolation to match point counts)
+    3. Build KD-tree with comparison driver's XYZ coordinates
+    4. For each point in reference driver, find k nearest neighbors in comparison driver
     5. Use weighted average of k nearest speeds for comparison
     """
     
