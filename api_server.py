@@ -605,7 +605,7 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
         'speed_differences': [float(x) if not np.isnan(x) else None for x in speed_diffs],
         'reference_speeds': [float(x) for x in ref_speeds_matched],
         'comparison_speeds': [float(x) for x in comp_speeds],
-        'distance_coordinates': [float(x) for x in comparison_data['Distance'].values],
+        'distance_coordinates': [float(x) for x in reference_data['Distance'].values],
         'match_statistics': {
             'total_points': len(comp_coords),
             'valid_matches': int(np.sum(valid_matches)),

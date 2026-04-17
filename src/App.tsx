@@ -122,6 +122,8 @@ export default function App() {
   const [status, setStatus] = useState<string>("Idle");
   const [tone, setTone] = useState<"ready" | "loading" | "error">("ready");
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const speedDiffChartRef = useRef<HTMLDivElement | null>(null);
+  const [speedDiffData, setSpeedDiffData] = useState<any>(null);
   const eventsRequestIdRef = useRef(0);
   const sessionsRequestIdRef = useRef(0);
   const driversRequestIdRef = useRef(0);
@@ -413,6 +415,31 @@ export default function App() {
 
       const firstPayload = successful[0].payload!;
       setMetric((prev) => (firstPayload.channels.includes(prev) ? prev : firstPayload.channels[0] ?? ""));
+
+      // Load speed difference data if we have at least 2 drivers
+      if (successful.length >= 2) {
+        try {
+          setStatus(`Loading telemetry for ${selectedDrivers.length} driver${selectedDrivers.length > 1 ? "s" : ""}... Calculating speed differences...`);
+          const lapSelectorsStr = selectedDrivers.map(d => `${d}:${lapSelection[d] ?? "fastest"}`).join(",");
+          const speedDiffUrl = new URL("/api/speed-diff", API_BASE);
+          speedDiffUrl.searchParams.set("season", String(seasonValue));
+          speedDiffUrl.searchParams.set("event", form.event);
+          speedDiffUrl.searchParams.set("session", form.session);
+          speedDiffUrl.searchParams.set("drivers", selectedDrivers.join(","));
+          speedDiffUrl.searchParams.set("lap_selectors", lapSelectorsStr);
+          speedDiffUrl.searchParams.set("sample_frequency", "0.1S");
+          speedDiffUrl.searchParams.set("k_neighbors", "5");
+          speedDiffUrl.searchParams.set("max_distance_threshold", "30.0");
+          const speedDiffPayload = await fetchJson(speedDiffUrl.toString());
+          setSpeedDiffData(speedDiffPayload);
+        } catch (error) {
+          console.error("Failed to load speed difference data:", error);
+          setSpeedDiffData(null);
+        }
+      } else {
+        setSpeedDiffData(null);
+      }
+
       if (successful.length === results.length) {
         setTone("ready");
         setStatus("Telemetry loaded.");
@@ -432,6 +459,80 @@ export default function App() {
   useEffect(() => {
     loadTelemetry();
   }, []);
+
+  // Speed difference chart
+  useEffect(() => {
+    if (!speedDiffChartRef.current || !speedDiffData || !driverResults.length) {
+      return;
+    }
+
+    const referenceDriver = speedDiffData.meta.reference_driver;
+    const comparisons = speedDiffData.comparisons;
+    const referenceData = speedDiffData.reference_data;
+
+    // Create traces for speed difference chart
+    const traces: any[] = [];
+
+    // Add reference driver (horizontal line at 0)
+    traces.push({
+      x: referenceData.distance,
+      y: referenceData.distance.map(() => 0),
+      mode: "lines",
+      name: `${referenceDriver} (Reference)`,
+      line: {
+        color: "#7aa2ff",
+        width: 3,
+      },
+      hovertemplate: `Driver ${referenceDriver}<br>Distance %{x:.1f} m<br>Speed Diff 0.00 km/h<extra></extra>`,
+    });
+
+    // Add comparison drivers
+    let driverIndex = 1;
+    for (const driver of Object.keys(comparisons)) {
+      const comparison = comparisons[driver];
+      const color = getDriverColor(driver, driverIndex);
+      driverIndex++;
+
+      traces.push({
+        x: comparison.distance_coordinates,
+        y: comparison.speed_differences,
+        mode: "lines",
+        name: `${driver} vs ${referenceDriver}`,
+        line: {
+          color,
+          width: 2,
+        },
+        hovertemplate: `Driver ${driver}<br>Distance %{x:.1f} m<br>Speed Diff %{y:.2f} km/h<extra></extra>`,
+      });
+    }
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      margin: { l: 62, r: 20, t: 36, b: 50 },
+      xaxis: {
+        title: "Distance Along Lap (m)",
+        gridcolor: "rgba(255,255,255,0.08)",
+        tickfont: { color: "#b8becb" },
+        titlefont: { color: "#b8becb" },
+      },
+      yaxis: {
+        title: "Speed Difference (km/h)",
+        gridcolor: "rgba(255,255,255,0.08)",
+        tickfont: { color: "#b8becb" },
+        titlefont: { color: "#b8becb" },
+      },
+      hovermode: "x unified",
+    };
+
+    const config = {
+      responsive: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ["toImage"],
+    };
+
+    Plotly.react(speedDiffChartRef.current, traces, layout, config);
+  }, [speedDiffData, driverResults]);
 
   useEffect(() => {
     if (!driverResults.length || !chartRef.current || !metric) {
@@ -814,6 +915,7 @@ export default function App() {
 
         <section className="chart-panel">
           <div ref={chartRef} className="chart" />
+          <div ref={speedDiffChartRef} className="chart" />
         </section>
       </main>
     </div>
