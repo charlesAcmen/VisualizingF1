@@ -10,6 +10,9 @@ from urllib.parse import parse_qs, urlparse
 
 import fastf1
 import pandas as pd
+import numpy as np
+from scipy.spatial import KDTree
+from scipy.interpolate import interp1d
 
 
 CACHE_DIR = Path(__file__).resolve().parent / ".fastf1_cache"
@@ -238,7 +241,16 @@ def build_payload(season, event_name, session_code, driver, lap_selector):
             raise ValueError(f"Lap {lap_number} not found for driver '{driver}'.")
         lap_row = lap_matches.iloc[0]
 
-    car_data = lap_row.get_car_data().add_distance()
+    # Get car data with higher sampling frequency for better data density
+    car_data = lap_row.get_car_data()
+    
+    # 10Hz sampling (0.1s) - ACTIVE
+    # car_data = car_data.resample_channels('0.1s')
+    
+    # 20Hz sampling (0.05s) - COMMENTED OUT, can be enabled for higher precision
+    car_data = car_data.resample_channels('0.05s')
+    
+    car_data = car_data.add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
     car_data = car_data.loc[~car_data["Distance"].duplicated()].reset_index(drop=True)
 
@@ -450,6 +462,225 @@ def build_lap_list(season, event_name, session_code, driver):
     return lap_numbers
 
 
+def prepare_driver_speed_data(session, driver, lap_selector, sample_frequency='0.1S'):
+    """Prepare driver data with XYZ coordinates and speed for speed difference calculation."""
+    try:
+        # Get lap data
+        laps = session.laps.pick_drivers(driver)
+        if laps.empty:
+            raise ValueError(f"No laps found for driver '{driver}'.")
+            
+        if str(lap_selector).lower() == "fastest":
+            lap = laps.pick_fastest()
+            if lap is None or getattr(lap, "empty", False):
+                raise ValueError(f"Fastest lap not found for driver '{driver}'.")
+        else:
+            try:
+                lap_number = int(lap_selector)
+            except ValueError as exc:
+                raise ValueError("Lap must be 'fastest' or an integer.") from exc
+            lap_matches = laps.pick_lap(lap_number)
+            if lap_matches.empty:
+                raise ValueError(f"Lap {lap_number} not found for driver '{driver}'.")
+            lap = lap_matches.iloc[0]
+        
+        # Get car data and position data with resampling
+        car_data = lap.get_car_data()
+        pos_data = lap.get_pos_data()
+        
+        if car_data.empty or pos_data.empty:
+            raise ValueError(f"No telemetry data available for driver '{driver}'.")
+        
+        # Resample to higher frequency for better data density
+        if sample_frequency != 'original':
+            car_data = car_data.resample_channels(sample_frequency)
+            pos_data = pos_data.resample_channels(sample_frequency)
+            merged_data = car_data.merge_channels(pos_data)
+        else:
+            # Original data processing
+            car_data = car_data.add_distance()
+            car_data_reset = car_data.reset_index(drop=True)
+            pos_data_reset = pos_data.reset_index(drop=True)
+            merged_data = pd.merge_asof(car_data_reset, pos_data_reset, on='Time', direction='nearest')
+        
+        # Ensure distance column exists
+        if 'Distance' not in merged_data.columns:
+            merged_data = merged_data.add_distance()
+        
+        # Select relevant columns
+        result = merged_data[['X', 'Y', 'Z', 'Speed', 'Distance']].copy()
+        
+        # Remove rows with NaN values
+        result = result.dropna()
+        
+        if result.empty:
+            raise ValueError(f"No valid data after merging for driver '{driver}'.")
+            
+        return result
+        
+    except Exception as e:
+        raise ValueError(f"Error preparing data for driver '{driver}': {str(e)}")
+
+
+def interpolate_to_reference_count(data, target_count):
+    """Interpolate driver data to match reference point count."""
+    if len(data) == target_count:
+        return data.copy()
+    
+    # Create uniform distance grid
+    min_dist, max_dist = data['Distance'].min(), data['Distance'].max()
+    target_distances = np.linspace(min_dist, max_dist, target_count)
+    
+    # Interpolate each column
+    interpolated_data = pd.DataFrame({'Distance': target_distances})
+    
+    for col in ['X', 'Y', 'Z', 'Speed']:
+        # Create interpolation function
+        interp_func = interp1d(data['Distance'], data[col], 
+                               kind='linear', bounds_error=False, 
+                               fill_value='extrapolate')
+        interpolated_data[col] = interp_func(target_distances)
+    
+    return interpolated_data
+
+
+def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, max_distance_threshold=100.0):
+    """Calculate speed differences between reference and comparison driver using KD-tree."""
+    
+    # Ensure both datasets have same number of points
+    ref_count = len(reference_data)
+    comp_count = len(comparison_data)
+    
+    if ref_count != comp_count:
+        # Interpolate comparison driver to match reference
+        comparison_data = interpolate_to_reference_count(comparison_data, ref_count)
+    
+    # Build KD-tree with reference driver XYZ coordinates
+    ref_coords = reference_data[['X', 'Y', 'Z']].values
+    comp_coords = comparison_data[['X', 'Y', 'Z']].values
+    ref_speeds = reference_data['Speed'].values
+    comp_speeds = comparison_data['Speed'].values
+    
+    kdtree = KDTree(ref_coords)
+    
+    # Find k nearest neighbors for each comparison point
+    distances, indices = kdtree.query(comp_coords, k=k_neighbors)
+    
+    # Handle case where k=1 (distances and indices are 1D)
+    if k_neighbors == 1:
+        distances = distances.reshape(-1, 1)
+        indices = indices.reshape(-1, 1)
+    
+    # Calculate weighted average speeds using inverse distance weighting
+    ref_speeds_matched = np.zeros(len(comp_coords))
+    valid_matches = np.ones(len(comp_coords), dtype=bool)
+    
+    for i in range(len(comp_coords)):
+        # Filter neighbors by distance threshold
+        valid_neighbors = distances[i] <= max_distance_threshold
+        
+        if not np.any(valid_neighbors):
+            valid_matches[i] = False
+            continue
+        
+        # Use inverse distance weighting
+        neighbor_distances = distances[i][valid_neighbors]
+        neighbor_indices = indices[i][valid_neighbors]
+        neighbor_speeds = ref_speeds[neighbor_indices]
+        
+        # Calculate weights (inverse distance, avoid division by zero)
+        weights = 1.0 / (neighbor_distances + 1e-6)
+        weights = weights / weights.sum()  # Normalize weights
+        
+        # Weighted average of neighbor speeds
+        ref_speeds_matched[i] = np.sum(weights * neighbor_speeds)
+    
+    # Calculate speed differences
+    speed_diffs = np.full(len(comp_coords), np.nan)
+    speed_diffs[valid_matches] = comp_speeds[valid_matches] - ref_speeds_matched[valid_matches]
+    
+    # Calculate statistics
+    valid_diffs = speed_diffs[~np.isnan(speed_diffs)]
+    
+    result = {
+        'speed_differences': [float(x) if not np.isnan(x) else None for x in speed_diffs],
+        'reference_speeds': [float(x) for x in ref_speeds_matched],
+        'comparison_speeds': [float(x) for x in comp_speeds],
+        'distance_coordinates': [float(x) for x in comparison_data['Distance'].values],
+        'match_statistics': {
+            'total_points': len(comp_coords),
+            'valid_matches': int(np.sum(valid_matches)),
+            'match_rate': float(np.sum(valid_matches) / len(comp_coords)),
+            'mean_speed_diff': float(np.mean(valid_diffs)) if len(valid_diffs) > 0 else None,
+            'std_speed_diff': float(np.std(valid_diffs)) if len(valid_diffs) > 0 else None,
+            'max_speed_diff': float(np.max(np.abs(valid_diffs))) if len(valid_diffs) > 0 else None,
+        }
+    }
+    
+    return result
+
+
+def build_speed_diff_payload(season, event_name, session_code, drivers, lap_selectors, reference_driver=None, sample_frequency='0.1S', k_neighbors=5, max_distance_threshold=30.0):
+    """Build payload for speed difference comparison."""
+    session = load_session(season, event_name, session_code)
+    
+    # Prepare data for all drivers
+    driver_data = {}
+    for driver in drivers:
+        lap_selector = lap_selectors.get(driver, "fastest")
+        data = prepare_driver_speed_data(session, driver, lap_selector, sample_frequency)
+        driver_data[driver] = data
+    
+    if len(driver_data) < 2:
+        raise ValueError("Need at least 2 drivers with valid data")
+    
+    # Find driver with most points as reference (or use specified reference)
+    if reference_driver and reference_driver in driver_data:
+        ref_driver = reference_driver
+    else:
+        ref_driver = max(driver_data.keys(), key=lambda d: len(driver_data[d]))
+    
+    reference_data = driver_data[ref_driver]
+    
+    # Compare each driver with reference
+    comparisons = {}
+    
+    for driver in drivers:
+        if driver == ref_driver:
+            continue
+            
+        if driver not in driver_data:
+            continue
+        
+        comparison_result = calculate_speed_differences(reference_data, driver_data[driver], k_neighbors, max_distance_threshold)
+        comparisons[driver] = comparison_result
+    
+    # Get display session name
+    display_session_name = get_display_session_name(season, event_name, session.name, session_code)
+    
+    return {
+        'meta': {
+            'season': season,
+            'event': resolve_event_name(session.event),
+            'session': display_session_name,
+            'reference_driver': ref_driver,
+            'drivers': drivers,
+            'lap_selectors': lap_selectors,
+            'sample_frequency': sample_frequency,
+            'k_neighbors': k_neighbors,
+            'max_distance_threshold': max_distance_threshold
+        },
+        'comparisons': comparisons,
+        'reference_data': {
+            'distance': [float(x) for x in reference_data['Distance'].values],
+            'speed': [float(x) for x in reference_data['Speed'].values],
+            'x': [float(x) for x in reference_data['X'].values],
+            'y': [float(x) for x in reference_data['Y'].values],
+            'z': [float(x) for x in reference_data['Z'].values],
+        }
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"[HTTP] {self.address_string()} - {format % args}", flush=True)
@@ -576,6 +807,76 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, payload)
             except Exception as exc:
                 print(f"[API] /api/lap error: {exc}", flush=True)
+                traceback.print_exc()
+                self._send_json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/speed-diff":
+            params = parse_qs(parsed.query)
+            try:
+                season = int(params.get("season", [2023])[0])
+                event_name = params.get("event", ["Spanish Grand Prix"])[0]
+                session_code = params.get("session", ["Q"])[0]
+                
+                # Parse drivers list
+                drivers_param = params.get("drivers", ["VER,LEC"])
+                drivers = [d.strip().upper() for d in drivers_param[0].split(",") if d.strip()]
+                
+                # Parse lap selectors (format: "VER:fastest,LEC:12" or just "fastest" for all)
+                lap_selectors_param = params.get("lap_selectors", ["fastest"])
+                lap_selectors_str = lap_selectors_param[0]
+                
+                lap_selectors = {}
+                if ":" in lap_selectors_str:
+                    # Individual lap selectors per driver
+                    for selector in lap_selectors_str.split(","):
+                        if ":" in selector:
+                            driver, lap = selector.strip().split(":", 1)
+                            lap_selectors[driver.strip().upper()] = lap.strip()
+                else:
+                    # Same lap selector for all drivers
+                    for driver in drivers:
+                        lap_selectors[driver] = lap_selectors_str.strip()
+                
+                # Optional reference driver
+                reference_driver = params.get("reference_driver", [None])[0]
+                if reference_driver:
+                    reference_driver = reference_driver.strip().upper()
+                
+                # Optional sampling frequency (default: 0.1S for 10Hz)
+                sample_frequency = params.get("sample_frequency", ["0.1S"])[0]
+                if sample_frequency not in ['original', '0.1S', '0.05S']:
+                    sample_frequency = '0.1S'  # default to 10Hz
+                
+                # Optional k-neighbors and distance threshold
+                k_neighbors = int(params.get("k_neighbors", [5])[0])
+                max_distance_threshold = float(params.get("max_distance_threshold", [30.0])[0])
+                
+                started = perf_counter()
+                print(
+                    f"[API] /api/speed-diff season={season} event={event_name} session={session_code} drivers={drivers} lap_selectors={lap_selectors} freq={sample_frequency} k={k_neighbors} threshold={max_distance_threshold}",
+                    flush=True,
+                )
+
+                payload = build_speed_diff_payload(
+                    season=season,
+                    event_name=event_name,
+                    session_code=session_code,
+                    drivers=drivers,
+                    lap_selectors=lap_selectors,
+                    reference_driver=reference_driver,
+                    sample_frequency=sample_frequency,
+                    k_neighbors=k_neighbors,
+                    max_distance_threshold=max_distance_threshold
+                )
+                
+                elapsed_ms = (perf_counter() - started) * 1000
+                total_comparisons = len(payload.get("comparisons", {}))
+                print(f"[API] /api/speed-diff success comparisons={total_comparisons} elapsed_ms={elapsed_ms:.1f}", flush=True)
+                self._send_json(200, payload)
+                
+            except Exception as exc:
+                print(f"[API] /api/speed-diff error: {exc}", flush=True)
                 traceback.print_exc()
                 self._send_json(400, {"error": str(exc)})
             return
