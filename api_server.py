@@ -624,8 +624,15 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
     return result
 
 
-def build_speed_diff_payload(season, event_name, session_code, drivers, lap_selectors, reference_driver=None, sample_frequency='0.1S', k_neighbors=5, max_distance_threshold=30.0):
+def build_speed_diff_payload(season, event_name, session_code, drivers, lap_selectors, reference_driver=None, sample_frequency=None, k_neighbors=None, max_distance_threshold=None):
     """Build payload for speed difference comparison."""
+    # Use config defaults if not specified
+    if sample_frequency is None:
+        sample_frequency = Config.GLOBAL_SAMPLING_FREQUENCY
+    if k_neighbors is None:
+        k_neighbors = Config.DEFAULT_K_NEIGHBORS
+    if max_distance_threshold is None:
+        max_distance_threshold = Config.DEFAULT_MAX_DISTANCE_THRESHOLD
     session = load_session(season, event_name, session_code)
     
     # Prepare data for all drivers

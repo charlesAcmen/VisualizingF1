@@ -427,9 +427,7 @@ export default function App() {
           speedDiffUrl.searchParams.set("session", form.session);
           speedDiffUrl.searchParams.set("drivers", selectedDrivers.join(","));
           speedDiffUrl.searchParams.set("lap_selectors", lapSelectorsStr);
-          speedDiffUrl.searchParams.set("sample_frequency", "0.1S");
-          speedDiffUrl.searchParams.set("k_neighbors", "5");
-          speedDiffUrl.searchParams.set("max_distance_threshold", "30.0");
+          // Let API use config defaults by not setting these parameters
           const speedDiffPayload = await fetchJson(speedDiffUrl.toString());
           setSpeedDiffData(speedDiffPayload);
         } catch (error) {
