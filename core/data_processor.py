@@ -55,10 +55,10 @@ def prepare_driver_speed_data(session, driver, lap_selector, sample_frequency='0
             merged_data = car_data.merge_channels(pos_data)
         else:
             # Original data processing
-            car_data = car_data.add_distance()
             car_data_reset = car_data.reset_index(drop=True)
             pos_data_reset = pos_data.reset_index(drop=True)
             merged_data = pd.merge_asof(car_data_reset, pos_data_reset, on='Time', direction='nearest')
+            merged_data = merged_data.add_distance()
         
         # Ensure distance column exists
         if 'Distance' not in merged_data.columns:
