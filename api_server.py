@@ -597,15 +597,20 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
     # Calculate speed differences
     speed_diffs = np.full(len(comp_coords), np.nan)
     speed_diffs[valid_matches] = comp_speeds[valid_matches] - ref_speeds_matched[valid_matches]
-    
+
     # Calculate statistics
     valid_diffs = speed_diffs[~np.isnan(speed_diffs)]
-    
+
+    # Filter out NaN values to avoid vertical jump lines in chart
+    valid_indices = ~np.isnan(speed_diffs)
+    filtered_distances = comparison_data['Distance'].values[valid_indices]
+    filtered_speed_diffs = speed_diffs[valid_indices]
+
     result = {
-        'speed_differences': [float(x) if not np.isnan(x) else None for x in speed_diffs],
-        'reference_speeds': [float(x) for x in ref_speeds_matched],
-        'comparison_speeds': [float(x) for x in comp_speeds],
-        'distance_coordinates': [float(x) for x in reference_data['Distance'].values],
+        'speed_differences': [float(x) for x in filtered_speed_diffs],
+        'reference_speeds': [float(x) for x in ref_speeds_matched[valid_indices]],
+        'comparison_speeds': [float(x) for x in comp_speeds[valid_indices]],
+        'distance_coordinates': [float(x) for x in filtered_distances],
         'match_statistics': {
             'total_points': len(comp_coords),
             'valid_matches': int(np.sum(valid_matches)),

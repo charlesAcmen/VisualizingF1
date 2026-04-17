@@ -9,7 +9,7 @@ class Config:
     GLOBAL_SAMPLING_FREQUENCY = '0.05S'  # 20Hz for high precision
     
     # KD-tree default parameters
-    DEFAULT_K_NEIGHBORS = 5
+    DEFAULT_K_NEIGHBORS = 3
     DEFAULT_MAX_DISTANCE_THRESHOLD = 30.0  # meters
     
     # Data processing settings
