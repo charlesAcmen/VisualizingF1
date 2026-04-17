@@ -6,7 +6,7 @@ from typing import Dict, Any
 class Config:
     # Global sampling frequency - unified across all visualizations
     # Options: 'original', '0.2S' (5Hz), '0.1S' (10Hz), '0.05S' (20Hz), '0.02S' (50Hz)
-    GLOBAL_SAMPLING_FREQUENCY = '0.05S'  # 20Hz for high precision
+    GLOBAL_SAMPLING_FREQUENCY = '0.02S'  # 50Hz for high precision
     
     # KD-tree default parameters
     DEFAULT_K_NEIGHBORS = 3
