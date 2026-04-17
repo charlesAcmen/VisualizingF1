@@ -148,6 +148,15 @@ export default function App() {
     return DRIVER_COLORS[index % DRIVER_COLORS.length];
   }
 
+  function formatDriverLegendName(driver: string, lapSelection: string, actualLapNumber: number | null | undefined): string {
+    if (lapSelection === "fastest") {
+      const lapNum = actualLapNumber ? ` ${actualLapNumber}` : "";
+      return `${driver} Fastest${lapNum}`;
+    } else {
+      return `${driver} Lap ${lapSelection}`;
+    }
+  }
+
   useEffect(() => {
     const seasonValue = Number(form.season);
     if (!Number.isFinite(seasonValue)) {
@@ -451,12 +460,14 @@ export default function App() {
       const distance = data.distance_m ?? [];
       const y = data[metric] ?? [];
       const driver = result.payload.meta?.driver ?? result.driver;
+      const selectedLap = lapSelection[result.driver] ?? "fastest";
+      const actualLapNumber = result.payload.meta?.lap_number;
 
       return {
         x: distance,
         y,
         mode: "lines",
-        name: driver,
+        name: formatDriverLegendName(driver, selectedLap, actualLapNumber),
         line: {
           color,
           width: 2,
