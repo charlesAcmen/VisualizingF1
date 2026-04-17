@@ -544,83 +544,92 @@ def interpolate_to_reference_count(data, target_count):
 
 
 def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, max_distance_threshold=100.0):
-    """Calculate speed differences between reference and comparison driver using KD-tree."""
-    
+    """Calculate speed differences between reference and comparison driver using KD-tree.
+
+    Algorithm:
+    - Build KD-tree with comparison driver XYZ coordinates
+    - For each point in reference driver, find k nearest neighbors in comparison driver
+    - Use inverse distance weighting to estimate comparison driver speed at reference point
+    - Speed difference = reference_speed - estimated_comparison_speed
+    - X-axis uses reference driver's Distance
+    """
+
     # Ensure both datasets have same number of points
     ref_count = len(reference_data)
     comp_count = len(comparison_data)
-    
+
     if ref_count != comp_count:
         # Interpolate comparison driver to match reference
         comparison_data = interpolate_to_reference_count(comparison_data, ref_count)
-    
-    # Build KD-tree with reference driver XYZ coordinates
+
+    # Extract coordinates and speeds
     ref_coords = reference_data[['X', 'Y', 'Z']].values
     comp_coords = comparison_data[['X', 'Y', 'Z']].values
     ref_speeds = reference_data['Speed'].values
     comp_speeds = comparison_data['Speed'].values
-    
-    kdtree = KDTree(ref_coords)
-    
-    # Find k nearest neighbors for each comparison point
-    distances, indices = kdtree.query(comp_coords, k=k_neighbors)
-    
+
+    # Build KD-tree with comparison driver coordinates
+    kdtree = KDTree(comp_coords)
+
+    # Find k nearest neighbors in comparison data for each reference point
+    distances, indices = kdtree.query(ref_coords, k=k_neighbors)
+
     # Handle case where k=1 (distances and indices are 1D)
     if k_neighbors == 1:
         distances = distances.reshape(-1, 1)
         indices = indices.reshape(-1, 1)
-    
-    # Calculate weighted average speeds using inverse distance weighting
-    ref_speeds_matched = np.zeros(len(comp_coords))
-    valid_matches = np.ones(len(comp_coords), dtype=bool)
-    
-    for i in range(len(comp_coords)):
+
+    # Calculate weighted average speeds for comparison driver at reference points
+    comp_speeds_estimated = np.zeros(len(ref_coords))
+    valid_matches = np.ones(len(ref_coords), dtype=bool)
+
+    for i in range(len(ref_coords)):
         # Filter neighbors by distance threshold
         valid_neighbors = distances[i] <= max_distance_threshold
-        
+
         if not np.any(valid_neighbors):
             valid_matches[i] = False
             continue
-        
+
         # Use inverse distance weighting
         neighbor_distances = distances[i][valid_neighbors]
         neighbor_indices = indices[i][valid_neighbors]
-        neighbor_speeds = ref_speeds[neighbor_indices]
-        
+        neighbor_speeds = comp_speeds[neighbor_indices]
+
         # Calculate weights (inverse distance, avoid division by zero)
         weights = 1.0 / (neighbor_distances + 1e-6)
         weights = weights / weights.sum()  # Normalize weights
-        
+
         # Weighted average of neighbor speeds
-        ref_speeds_matched[i] = np.sum(weights * neighbor_speeds)
-    
-    # Calculate speed differences
-    speed_diffs = np.full(len(comp_coords), np.nan)
-    speed_diffs[valid_matches] = comp_speeds[valid_matches] - ref_speeds_matched[valid_matches]
+        comp_speeds_estimated[i] = np.sum(weights * neighbor_speeds)
+
+    # Calculate speed differences (reference speed - estimated comparison speed)
+    speed_diffs = np.full(len(ref_coords), np.nan)
+    speed_diffs[valid_matches] = ref_speeds[valid_matches] - comp_speeds_estimated[valid_matches]
 
     # Calculate statistics
     valid_diffs = speed_diffs[~np.isnan(speed_diffs)]
 
     # Filter out NaN values to avoid vertical jump lines in chart
     valid_indices = ~np.isnan(speed_diffs)
-    filtered_distances = comparison_data['Distance'].values[valid_indices]
+    filtered_distances = reference_data['Distance'].values[valid_indices]
     filtered_speed_diffs = speed_diffs[valid_indices]
 
     result = {
         'speed_differences': [float(x) for x in filtered_speed_diffs],
-        'reference_speeds': [float(x) for x in ref_speeds_matched[valid_indices]],
-        'comparison_speeds': [float(x) for x in comp_speeds[valid_indices]],
+        'reference_speeds': [float(x) for x in ref_speeds[valid_indices]],
+        'comparison_speeds_estimated': [float(x) for x in comp_speeds_estimated[valid_indices]],
         'distance_coordinates': [float(x) for x in filtered_distances],
         'match_statistics': {
-            'total_points': len(comp_coords),
+            'total_points': len(ref_coords),
             'valid_matches': int(np.sum(valid_matches)),
-            'match_rate': float(np.sum(valid_matches) / len(comp_coords)),
+            'match_rate': float(np.sum(valid_matches) / len(ref_coords)),
             'mean_speed_diff': float(np.mean(valid_diffs)) if len(valid_diffs) > 0 else None,
             'std_speed_diff': float(np.std(valid_diffs)) if len(valid_diffs) > 0 else None,
             'max_speed_diff': float(np.max(np.abs(valid_diffs))) if len(valid_diffs) > 0 else None,
         }
     }
-    
+
     return result
 
 
