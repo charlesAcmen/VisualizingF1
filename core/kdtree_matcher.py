@@ -30,16 +30,6 @@ def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, 
         - distance_coordinates: List of distance coordinates
         - match_statistics: Dictionary with matching statistics
     """
-    from core.interpolator import interpolate_to_reference_count
-    
-    # Ensure both datasets have same number of points
-    ref_count = len(reference_data)
-    comp_count = len(comparison_data)
-
-    if ref_count != comp_count:
-        # Interpolate comparison driver to match reference
-        comparison_data = interpolate_to_reference_count(comparison_data, ref_count)
-
     # Extract coordinates and speeds
     ref_coords = reference_data[['X', 'Y', 'Z']].values
     comp_coords = comparison_data[['X', 'Y', 'Z']].values

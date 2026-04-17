@@ -2,6 +2,7 @@
 Session service for managing FastF1 session loading and caching.
 """
 import fastf1
+import pandas as pd
 from pathlib import Path
 from utils.cache import SessionCache
 from utils.helpers import is_testing_event, get_testing_event_number
