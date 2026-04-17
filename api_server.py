@@ -14,6 +14,7 @@ import numpy as np
 from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 
+from config import Config
 
 CACHE_DIR = Path(__file__).resolve().parent / ".fastf1_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -241,14 +242,12 @@ def build_payload(season, event_name, session_code, driver, lap_selector):
             raise ValueError(f"Lap {lap_number} not found for driver '{driver}'.")
         lap_row = lap_matches.iloc[0]
 
-    # Get car data with higher sampling frequency for better data density
+    # Get car data with global sampling frequency for unified data density
     car_data = lap_row.get_car_data()
     
-    # 10Hz sampling (0.1s) - ACTIVE
-    # car_data = car_data.resample_channels('0.1s')
-    
-    # 20Hz sampling (0.05s) - COMMENTED OUT, can be enabled for higher precision
-    car_data = car_data.resample_channels('0.05s')
+    # Use global sampling frequency configuration
+    if Config.GLOBAL_SAMPLING_FREQUENCY != 'original':
+        car_data = car_data.resample_channels(Config.GLOBAL_SAMPLING_FREQUENCY)
     
     car_data = car_data.add_distance()
     car_data = car_data[car_data["Distance"].notna()].copy()
