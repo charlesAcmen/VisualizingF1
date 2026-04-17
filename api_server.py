@@ -862,15 +862,20 @@ class Handler(BaseHTTPRequestHandler):
                 reference_driver = params.get("reference_driver", [None])[0]
                 if reference_driver:
                     reference_driver = reference_driver.strip().upper()
+
+                # Optional sampling frequency (use config default if not specified)
+                sample_frequency = params.get("sample_frequency", [None])[0]
+                if sample_frequency:
+                    sample_frequency = Config.validate_frequency(sample_frequency)
+                else:
+                    sample_frequency = Config.GLOBAL_SAMPLING_FREQUENCY
                 
-                # Optional sampling frequency (default: 0.1S for 10Hz)
-                sample_frequency = params.get("sample_frequency", ["0.1S"])[0]
-                if sample_frequency not in ['original', '0.1S', '0.05S']:
-                    sample_frequency = '0.1S'  # default to 10Hz
-                
-                # Optional k-neighbors and distance threshold
-                k_neighbors = int(params.get("k_neighbors", [5])[0])
-                max_distance_threshold = float(params.get("max_distance_threshold", [30.0])[0])
+                # Optional k-neighbors and distance threshold (use config defaults if not specified)
+                k_neighbors_param = params.get("k_neighbors", [None])[0]
+                k_neighbors = int(k_neighbors_param) if k_neighbors_param else Config.DEFAULT_K_NEIGHBORS
+
+                max_distance_threshold_param = params.get("max_distance_threshold", [None])[0]
+                max_distance_threshold = float(max_distance_threshold_param) if max_distance_threshold_param else Config.DEFAULT_MAX_DISTANCE_THRESHOLD
                 
                 started = perf_counter()
                 print(

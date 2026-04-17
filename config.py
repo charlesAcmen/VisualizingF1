@@ -10,7 +10,7 @@ class Config:
     
     # KD-tree default parameters
     DEFAULT_K_NEIGHBORS = 3
-    DEFAULT_MAX_DISTANCE_THRESHOLD = 30.0  # meters
+    DEFAULT_MAX_DISTANCE_THRESHOLD = 15.0  # meters
     
     # Data processing settings
     ENABLE_DISTANCE_BASED_PROCESSING = True
