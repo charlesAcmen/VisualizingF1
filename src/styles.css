@@ -70,6 +70,7 @@ h1 {
   gap: 16px;
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 6px;
   min-width: 0;
 }
