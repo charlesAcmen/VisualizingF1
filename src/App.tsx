@@ -158,13 +158,19 @@ export default function App() {
     return DRIVER_COLORS[index % DRIVER_COLORS.length];
   }
 
-  function formatDriverLegendName(driver: string, lapSelection: string, actualLapNumber: number | null | undefined): string {
+  function formatDriverLegendName(driver: string, lapSelection: string, actualLapNumber: number | null | undefined, lapTime?: string | null): string {
+    let baseName: string;
     if (lapSelection === "fastest") {
       const lapNum = actualLapNumber ? ` ${actualLapNumber}` : "";
-      return `${driver} Fastest${lapNum}`;
+      baseName = `${driver} Fastest${lapNum}`;
     } else {
-      return `${driver} Lap ${lapSelection}`;
+      baseName = `${driver} Lap ${lapSelection}`;
     }
+    
+    if (lapTime) {
+      return `${baseName} (${lapTime}s)`;
+    }
+    return baseName;
   }
 
   useEffect(() => {
@@ -479,12 +485,27 @@ export default function App() {
     // Create traces for speed difference chart
     const traces: any[] = [];
 
+    // Format lap time for display (convert seconds to string with 3 decimal places)
+    const formatLapTime = (seconds: number | null | undefined): string | null => {
+      if (seconds === null || seconds === undefined) return null;
+      return seconds.toFixed(3);
+    };
+
+    // Format lap time difference for display (with sign)
+    const formatLapTimeDiff = (diff: number | null | undefined): string | null => {
+      if (diff === null || diff === undefined) return null;
+      const sign = diff >= 0 ? "+" : "";
+      return `${sign}${diff.toFixed(3)}`;
+    };
+
     // Add reference driver (horizontal line at 0)
+    const refLapTime = formatLapTime(referenceData.lap_time);
+    const refName = refLapTime ? `${referenceDriver} (${refLapTime}s)` : `${referenceDriver} (Reference)`;
     traces.push({
       x: referenceData.distance,
       y: referenceData.distance.map(() => 0),
       mode: "lines",
-      name: `${referenceDriver} (Reference)`,
+      name: refName,
       line: {
         color: "#7aa2ff",
         width: 3,
@@ -499,11 +520,14 @@ export default function App() {
       const color = getDriverColor(driver, driverIndex);
       driverIndex++;
 
+      const lapTimeDiff = formatLapTimeDiff(comparison.lap_time_diff);
+      const compName = lapTimeDiff ? `${driver} (${lapTimeDiff}s)` : `${driver} vs ${referenceDriver}`;
+
       traces.push({
         x: comparison.distance_coordinates,
         y: comparison.speed_differences,
         mode: "lines",
-        name: `${driver} vs ${referenceDriver}`,
+        name: compName,
         line: {
           color,
           width: 2,
@@ -569,12 +593,13 @@ export default function App() {
       const driver = result.payload.meta?.driver ?? result.driver;
       const selectedLap = lapSelection[result.driver] ?? "fastest";
       const actualLapNumber = result.payload.meta?.lap_number;
+      const lapTime = result.payload.meta?.lap_time;
 
       return {
         x: distance,
         y,
         mode: "lines",
-        name: formatDriverLegendName(driver, selectedLap, actualLapNumber),
+        name: formatDriverLegendName(driver, selectedLap, actualLapNumber, lapTime),
         line: {
           color,
           width: 2,

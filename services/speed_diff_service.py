@@ -3,9 +3,10 @@ Speed difference service for comparing driver telemetry using spatial matching.
 """
 from config import Config
 from services.session_service import SessionService, get_display_session_name
-from utils.helpers import resolve_event_name
+from utils.helpers import resolve_event_name, format_lap_time
 from core.data_processor import prepare_driver_speed_data
 from core.kdtree_matcher import calculate_speed_differences
+import pandas as pd
 
 
 class SpeedDiffService:
@@ -44,12 +45,33 @@ class SpeedDiffService:
         
         session = SessionService.load_session(season, event_name, session_code)
         
-        # Prepare data for all drivers
+        # Prepare data for all drivers and extract lap times
         driver_data = {}
+        driver_lap_times = {}
         for driver in drivers:
             lap_selector = lap_selectors.get(driver, "fastest")
             data = prepare_driver_speed_data(session, driver, lap_selector, sample_frequency)
             driver_data[driver] = data
+            
+            # Extract lap time from session laps
+            laps = session.laps.pick_drivers(driver)
+            if str(lap_selector).lower() == "fastest":
+                lap_row = laps.pick_fastest()
+            else:
+                try:
+                    lap_number = int(lap_selector)
+                    lap_matches = laps.pick_lap(lap_number)
+                    if lap_matches.empty:
+                        lap_row = None
+                    else:
+                        lap_row = lap_matches.iloc[0]
+                except ValueError:
+                    lap_row = laps.pick_fastest()
+            
+            if lap_row is not None and not getattr(lap_row, "empty", False):
+                lap_time = lap_row.get("LapTime")
+                if pd.notna(lap_time):
+                    driver_lap_times[driver] = lap_time.total_seconds()
         
         if len(driver_data) < 2:
             raise ValueError("Need at least 2 drivers with valid data")
@@ -65,6 +87,9 @@ class SpeedDiffService:
         # Compare each driver with reference
         comparisons = {}
         
+        # Get reference lap time for difference calculation
+        ref_lap_time = driver_lap_times.get(ref_driver)
+        
         for driver in drivers:
             if driver == ref_driver:
                 continue
@@ -78,6 +103,18 @@ class SpeedDiffService:
                 k_neighbors, 
                 max_distance_threshold
             )
+            
+            # Calculate lap time difference (comparison - reference) in seconds
+            lap_time_diff = None
+            if ref_lap_time is not None and driver in driver_lap_times:
+                lap_time_diff = driver_lap_times[driver] - ref_lap_time
+                # Round to 3 significant digits
+                lap_time_diff = round(lap_time_diff, 3)
+            
+            # Add lap time information to comparison result
+            comparison_result['lap_time'] = driver_lap_times.get(driver)
+            comparison_result['lap_time_diff'] = lap_time_diff
+            
             comparisons[driver] = comparison_result
         
         # Get display session name
@@ -102,5 +139,6 @@ class SpeedDiffService:
                 'x': [float(x) for x in reference_data['X'].values],
                 'y': [float(x) for x in reference_data['Y'].values],
                 'z': [float(x) for x in reference_data['Z'].values],
+                'lap_time': driver_lap_times.get(ref_driver)
             }
         }
