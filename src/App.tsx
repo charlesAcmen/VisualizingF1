@@ -158,19 +158,9 @@ export default function App() {
     return DRIVER_COLORS[index % DRIVER_COLORS.length];
   }
 
-  function formatDriverLegendName(driver: string, lapSelection: string, actualLapNumber: number | null | undefined, lapTime?: string | null): string {
-    let baseName: string;
-    if (lapSelection === "fastest") {
-      const lapNum = actualLapNumber ? ` ${actualLapNumber}` : "";
-      baseName = `${driver} Fastest${lapNum}`;
-    } else {
-      baseName = `${driver} Lap ${lapSelection}`;
-    }
-    
-    if (lapTime) {
-      return `${baseName} (${lapTime}s)`;
-    }
-    return baseName;
+  function formatDriverLegendName(driver: string): string {
+    // Simplify legend to only show driver code for space efficiency
+    return driver;
   }
 
   useEffect(() => {
@@ -500,17 +490,20 @@ export default function App() {
 
     // Add reference driver (horizontal line at 0)
     const refLapTime = formatLapTime(referenceData.lap_time);
-    const refName = refLapTime ? `${referenceDriver} (${refLapTime}s)` : `${referenceDriver} (Reference)`;
+    let refHoverInfo = `Driver ${referenceDriver}<br>Distance %{x:.1f} m<br>Speed Diff 0.00 km/h`;
+    if (refLapTime) {
+      refHoverInfo += `<br>Lap Time: ${refLapTime}s`;
+    }
     traces.push({
       x: referenceData.distance,
       y: referenceData.distance.map(() => 0),
       mode: "lines",
-      name: refName,
+      name: referenceDriver,
       line: {
         color: "#7aa2ff",
         width: 3,
       },
-      hovertemplate: `Driver ${referenceDriver}<br>Distance %{x:.1f} m<br>Speed Diff 0.00 km/h<extra></extra>`,
+      hovertemplate: `${refHoverInfo}<extra></extra>`,
     });
 
     // Add comparison drivers
@@ -521,18 +514,21 @@ export default function App() {
       driverIndex++;
 
       const lapTimeDiff = formatLapTimeDiff(comparison.lap_time_diff);
-      const compName = lapTimeDiff ? `${driver} (${lapTimeDiff}s)` : `${driver} vs ${referenceDriver}`;
+      let compHoverInfo = `Driver ${driver}<br>Distance %{x:.1f} m<br>Speed Diff %{y:.2f} km/h`;
+      if (lapTimeDiff) {
+        compHoverInfo += `<br>Lap Time Diff: ${lapTimeDiff}s`;
+      }
 
       traces.push({
         x: comparison.distance_coordinates,
         y: comparison.speed_differences,
         mode: "lines",
-        name: compName,
+        name: driver,
         line: {
           color,
           width: 2,
         },
-        hovertemplate: `Driver ${driver}<br>Distance %{x:.1f} m<br>Speed Diff %{y:.2f} km/h<extra></extra>`,
+        hovertemplate: `${compHoverInfo}<extra></extra>`,
       });
     }
 
@@ -591,21 +587,29 @@ export default function App() {
       const distance = data.distance_m ?? [];
       const y = data[metric] ?? [];
       const driver = result.payload.meta?.driver ?? result.driver;
-      const selectedLap = lapSelection[result.driver] ?? "fastest";
       const actualLapNumber = result.payload.meta?.lap_number;
       const lapTime = result.payload.meta?.lap_time;
+
+      // Build detailed hover template with lap information
+      let hoverInfo = `Driver ${driver}<br>Distance %{x:.1f} m<br>${metric} %{y:.2f}${unit ? ` ${unit}` : ""}`;
+      if (lapTime) {
+        hoverInfo += `<br>Lap Time: ${lapTime}s`;
+      }
+      if (actualLapNumber) {
+        hoverInfo += `<br>Lap: ${actualLapNumber}`;
+      }
 
       return {
         x: distance,
         y,
         mode: "lines",
-        name: formatDriverLegendName(driver, selectedLap, actualLapNumber, lapTime),
+        name: formatDriverLegendName(driver),
         line: {
           color,
           width: 2,
           shape: isBoolean ? "hv" : "linear",
         },
-        hovertemplate: `Driver ${driver}<br>Distance %{x:.1f} m<br>${metric} %{y:.2f}${unit ? ` ${unit}` : ""}<extra></extra>`,
+        hovertemplate: `${hoverInfo}<extra></extra>`,
       };
     });
 
