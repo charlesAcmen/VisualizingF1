@@ -100,6 +100,14 @@ function summarizeDriverError(driver: string, error: string | null): string {
   if (error.includes("Fastest lap not found")) {
     return `${driver} has no fastest lap`;
   }
+  if (error.includes("Lap") && error.includes("not found")) {
+    // Extract lap number from error message like "Lap 20 not found"
+    const lapMatch = error.match(/Lap (\d+) not found/);
+    if (lapMatch) {
+      return `${driver}: Lap ${lapMatch[1]} not found`;
+    }
+    return `${driver}: Lap not found`;
+  }
   if (error.includes("No laps found")) {
     return `${driver} has no laps`;
   }
