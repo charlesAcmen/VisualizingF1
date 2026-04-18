@@ -5,7 +5,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 
-def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, max_distance_threshold=100.0):
+def calculate_speed_differences(reference_data, comparison_data, k_neighbors=3, max_distance_threshold=10.0):
     """
     Calculate speed differences between reference and comparison driver using KD-tree.
     
