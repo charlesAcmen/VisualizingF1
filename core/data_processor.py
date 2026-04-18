@@ -2,7 +2,6 @@
 Data processing utilities for preparing telemetry data.
 """
 import pandas as pd
-from config import Config
 
 
 def prepare_driver_speed_data(session, driver, lap_selector, sample_frequency='0.1S'):
@@ -72,7 +71,7 @@ def prepare_driver_speed_data(session, driver, lap_selector, sample_frequency='0
         
         if result.empty:
             raise ValueError(f"No valid data after merging for driver '{driver}'.")
-            
+        
         return result
         
     except Exception as e:
