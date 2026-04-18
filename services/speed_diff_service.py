@@ -112,9 +112,7 @@ class SpeedDiffService:
                 lap_time_diff = round(lap_time_diff, 3)
             
             # Add lap time information to comparison result
-            # Convert to string with 3 decimal places for consistent display
-            driver_lap_time = driver_lap_times.get(driver)
-            comparison_result['lap_time'] = round(driver_lap_time, 3) if driver_lap_time is not None else None
+            comparison_result['lap_time'] = driver_lap_times.get(driver)
             comparison_result['lap_time_diff'] = lap_time_diff
             
             comparisons[driver] = comparison_result
@@ -141,6 +139,6 @@ class SpeedDiffService:
                 'x': [float(x) for x in reference_data['X'].values],
                 'y': [float(x) for x in reference_data['Y'].values],
                 'z': [float(x) for x in reference_data['Z'].values],
-                'lap_time': round(driver_lap_times.get(ref_driver), 3) if driver_lap_times.get(ref_driver) is not None else None
+                'lap_time': driver_lap_times.get(ref_driver)
             }
         }

@@ -500,7 +500,7 @@ export default function App() {
 
     // Add reference driver (horizontal line at 0)
     const refLapTime = formatLapTime(referenceData.lap_time);
-    const refName = refLapTime ? `${refLapTime}s` : "Ref";
+    const refName = refLapTime ? `${referenceDriver} (${refLapTime}s)` : `${referenceDriver} (Reference)`;
     traces.push({
       x: referenceData.distance,
       y: referenceData.distance.map(() => 0),
@@ -510,7 +510,7 @@ export default function App() {
         color: "#7aa2ff",
         width: 3,
       },
-      hovertemplate: `${referenceDriver}<br>Distance %{x:.1f} m<br>Speed Diff 0.00 km/h<extra></extra>`,
+      hovertemplate: `Driver ${referenceDriver}<br>Distance %{x:.1f} m<br>Speed Diff 0.00 km/h<extra></extra>`,
     });
 
     // Add comparison drivers
@@ -521,7 +521,7 @@ export default function App() {
       driverIndex++;
 
       const lapTimeDiff = formatLapTimeDiff(comparison.lap_time_diff);
-      const compName = lapTimeDiff ? `${driver} ${lapTimeDiff}s` : driver;
+      const compName = lapTimeDiff ? `${driver} (${lapTimeDiff}s)` : `${driver} vs ${referenceDriver}`;
 
       traces.push({
         x: comparison.distance_coordinates,
@@ -532,7 +532,7 @@ export default function App() {
           color,
           width: 2,
         },
-        hovertemplate: `${driver}<br>Distance %{x:.1f} m<br>Speed Diff %{y:.2f} km/h<extra></extra>`,
+        hovertemplate: `Driver ${driver}<br>Distance %{x:.1f} m<br>Speed Diff %{y:.2f} km/h<extra></extra>`,
       });
     }
 
