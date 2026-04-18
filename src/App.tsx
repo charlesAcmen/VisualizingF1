@@ -784,44 +784,46 @@ export default function App() {
                       <option value="fastest">Fastest</option>
                       <option value="number">Lap number</option>
                     </select>
-                    {bulkLapMode === "number" ? (
-                      <input
-                        value={bulkLapNumber}
-                        onChange={(event) => setBulkLapNumber(event.target.value)}
-                        placeholder="e.g. 12"
-                        inputMode="numeric"
-                      />
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLapSelection((prev) => {
-                          const next = { ...prev };
-                          if (bulkLapMode === "fastest") {
+                    <div className="bulk-controls-row">
+                      {bulkLapMode === "number" ? (
+                        <input
+                          value={bulkLapNumber}
+                          onChange={(event) => setBulkLapNumber(event.target.value)}
+                          placeholder="e.g. 12"
+                          inputMode="numeric"
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLapSelection((prev) => {
+                            const next = { ...prev };
+                            if (bulkLapMode === "fastest") {
+                              selectedDrivers.forEach((driver) => {
+                                next[driver] = "fastest";
+                              });
+                              return next;
+                            }
+
+                            const targetLap = Number(bulkLapNumber);
+                            if (!Number.isFinite(targetLap) || targetLap <= 0) {
+                              selectedDrivers.forEach((driver) => {
+                                next[driver] = "fastest";
+                              });
+                              return next;
+                            }
+
                             selectedDrivers.forEach((driver) => {
-                              next[driver] = "fastest";
+                              const options = lapOptions[driver] ?? [];
+                              next[driver] = options.includes(targetLap) ? String(targetLap) : "fastest";
                             });
                             return next;
-                          }
-
-                          const targetLap = Number(bulkLapNumber);
-                          if (!Number.isFinite(targetLap) || targetLap <= 0) {
-                            selectedDrivers.forEach((driver) => {
-                              next[driver] = "fastest";
-                            });
-                            return next;
-                          }
-
-                          selectedDrivers.forEach((driver) => {
-                            const options = lapOptions[driver] ?? [];
-                            next[driver] = options.includes(targetLap) ? String(targetLap) : "fastest";
                           });
-                          return next;
-                        });
-                      }}
-                    >
-                      Apply
-                    </button>
+                        }}
+                      >
+                        Apply
+                      </button>
+                    </div>
                   </div>
                   <div className="note">If a lap number doesn't exist for a driver, it falls back to Fastest.</div>
                 </div>
